@@ -15,15 +15,15 @@ At the start and end of your task run (never fail if missing):
 3. `git fetch origin ${base_branch} 2>/dev/null || true`
 4. If `git rev-parse --abbrev-ref HEAD` already equals `feature/${branch_slug}` (a retry), keep it: do NOT switch branches and do NOT discard or stash uncommitted work; skip to step 6.
    Otherwise: `git checkout ${base_branch}`; `git pull --ff-only 2>/dev/null || true`
-5. `git checkout -b feature/${branch_slug}` (if it already exists: `git checkout feature/${branch_slug}`).
+5. `git checkout -b feature/${branch_slug}` (if it already exists: `git checkout feature/${branch_slug}`). Then verify: `git branch --show-current` MUST print `feature/${branch_slug}`; if not, run `scripts/task-state.js set ${task_id} phase=branched status=failed 2>/dev/null || true`, output `BRANCH=FAILED` with the git error, and stop.
 6. `scripts/task-state.js set ${task_id} phase=branched status=in_progress branch=feature/${branch_slug} 2>/dev/null || true`
 7. Final output (one line): `BRANCH=feature/${branch_slug} BASE=${base_branch}`
 
 ## Recipe B — MERGE (task-merge; runs only if validation PASSED)
 1. `scripts/task-state.js set ${task_id} phase=merging status=in_progress 2>/dev/null || true`
 2. `cd ${repo_path}`; confirm current branch is feature/${branch_slug}.
-3. Safety check: `git status --porcelain`. If any changed/untracked path matches `.env*`, `*.pem`, `*.key`, `id_rsa*`, `node_modules/`, `*.log`, or other obvious secrets/build output, do NOT commit: run `scripts/task-state.js set ${task_id} phase=merging status=failed 2>/dev/null || true`, output `MERGE=ABORTED_SENSITIVE_FILES <paths>`, and stop (branch stays open).
-   Then stage only application changes, excluding workflow state: `git add -A -- . ':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache'`; `git commit -m "feat(${branch_slug}): implement intent ${task_id}"` (skip if nothing to commit).
+3. Stage and safety-check (respects .gitignore; never judge by `git status --porcelain`, which collapses untracked directories): `git add -A -- . ':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache'`, then list exactly what will be committed with `git diff --cached --name-only`. If any listed path matches `.env*` (except `.env.example`), `*.pem`, `*.key`, `id_rsa*`, `node_modules/`, `*.log`, `dist/`, `build/`, `*.db` or other obvious secrets/build output, do NOT commit: `git reset -q`, run `scripts/task-state.js set ${task_id} phase=merging status=failed 2>/dev/null || true`, output `MERGE=ABORTED_SENSITIVE_FILES <paths>` and stop. Ignored files never appear in this list and are fine.
+   Then `git commit -m "feat(${branch_slug}): implement intent ${task_id}"` (skip if nothing to commit).
 4. `git push -u origin feature/${branch_slug}` (if no remote exists, skip push and note it).
 5. `git checkout ${base_branch}`; `git merge --no-ff feature/${branch_slug} -m "Merge feature/${branch_slug}"`.
 6. If the merge conflicts: `git merge --abort`, run `scripts/task-state.js set ${task_id} phase=merging status=failed 2>/dev/null || true`, report `MERGE=CONFLICT`, stop.
