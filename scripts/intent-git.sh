@@ -46,7 +46,10 @@ branch)
 merge)
   st phase=merging status=in_progress
   [ "$(git branch --show-current)" = "$feature" ] || fail merging MERGE=FAILED "not-on:$feature"
-  git add -A -- . "${excl[@]}" || fail merging MERGE=FAILED git-add
+  # Add everything, then unstage the orchestrator's own files. (Exclude pathspecs in `git add` exit 1
+  # when the excluded path is also gitignored.)
+  git add -A -- . || fail merging MERGE=FAILED git-add
+  for p in .task-state scripts/task-state.js .copilot-cache; do git reset -q -- "$p" 2>/dev/null || true; done
   bad=$(git diff --cached --name-only \
     | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|(^|/)id_rsa|(^|/)node_modules/|\.log$|(^|/)dist/|(^|/)build/|\.db$' \
     | grep -vE '(^|/)\.env\.example$' | tr '\n' ' ')
