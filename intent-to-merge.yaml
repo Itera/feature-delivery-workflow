@@ -63,15 +63,16 @@ agents:
             - Edit
     - id: agent-team-1791906795-ce1d1a69-specialist-1
       type: specialist
-      name: git-agent
+      name: reporter
       runtime: copilot
       model: claude-haiku-4.5
-      prompt: '@file:prompts/intent-to-merge/git-agent.md'
+      # runtime: copilot passes only this prompt to the agent, not the task description, so each
+      # agent gets exactly one job. Branch/merge are deterministic command tasks (scripts/intent-git.sh).
+      prompt: '@file:prompts/intent-to-merge/reporter.md'
       permissions:
         mode: acceptEdits
         allowed_tools:
             - Read
-            - Bash(git:*)
             - Bash(scripts/task-state.js:*)
             - Bash(cd:*)
         denied_tools:
@@ -80,7 +81,7 @@ agents:
 tasks:
     - id: task-report-outcome
       name: report-final-outcome
-      description: 'RECIPE=C. Execute Recipe C (REPORT OUTCOME) from your prompt, reading verdicts from the state file.'
+      description: 'Report the outcome of intent ${task_id} from the state file, following your prompt.'
       type: standard
       agent: agent-team-1791906795-ce1d1a69-specialist-1
       depends_on:
@@ -110,10 +111,10 @@ tasks:
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906829-499dfe
     - id: task-team-1791906795-ce1d1a69-1791906831-70759d
-      name: execute-recipe-b-merge-from-your-prompt-commit
-      description: 'RECIPE=B. Execute Recipe B (MERGE) from your prompt: commit, push, merge feature/${branch_slug} into ${base_branch} in ${repo_path}, delete the branch.'
-      type: standard
-      agent: agent-team-1791906795-ce1d1a69-specialist-1
+      name: merge
+      action: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh merge "${task_id}" "${branch_slug}" "${base_branch}"'
       when: "${tasks.gate-validate.output?} == PASS"
       depends_on:
         - gate-validate
@@ -148,10 +149,10 @@ tasks:
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906820-e47692
     - id: task-team-1791906795-ce1d1a69-1791906820-e47692
-      name: execute-recipe-a-branch-from-your-prompt-create
-      description: 'RECIPE=A. Execute Recipe A (BRANCH) from your prompt: create feature/${branch_slug} off ${base_branch} in ${repo_path}. Report BRANCH=... line only as final output.'
-      type: standard
-      agent: agent-team-1791906795-ce1d1a69-specialist-1
+      name: branch
+      action: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh branch "${task_id}" "${branch_slug}" "${base_branch}"'
 settings:
     max_concurrency: 1
     timeout: 90m0s
@@ -159,10 +160,10 @@ settings:
     cwd: ${repo_path}
     permissions:
         # Ceiling, not default: agents cannot escalate above it. implementer/tester/validator
-        # need unattended arbitrary build/run commands; git-agent and reviewer narrow themselves.
+        # need unattended arbitrary build/run commands; reporter and reviewer narrow themselves.
         mode: bypassPermissions
         # runtime: copilot (verified 2026-10-20): bypassPermissions agents get --allow-all-tools and NO
-        # deny flags, so this list only applies to acceptEdits agents (git-agent, reviewer). Copilot
+        # deny flags, so this list only applies to acceptEdits agents (reporter, reviewer). Copilot
         # cannot express sub-arguments: Bash(git push --force:*) collapses to deny shell(git:*), which
         # blocks ALL git for those agents. Keep only rules whose first word is safe to deny outright;
         # git-safety rules for bypass agents live in their prompts.
