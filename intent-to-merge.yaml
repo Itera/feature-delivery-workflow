@@ -37,7 +37,16 @@ agents:
       model: claude-sonnet-5.5
       prompt: '@file:prompts/intent-to-merge/reviewer.md'
       permissions:
-        mode: bypassPermissions
+        mode: acceptEdits
+        allowed_tools:
+            - Read
+            - Grep
+            - Glob
+            - Bash(git diff:*)
+            - Bash(git status:*)
+            - Bash(git log:*)
+            - Bash(git show:*)
+            - Bash(scripts/task-state.js:*)
         denied_tools:
             - Write
             - Edit
@@ -59,7 +68,15 @@ agents:
       model: claude-haiku-4.5
       prompt: '@file:prompts/intent-to-merge/git-agent.md'
       permissions:
-        mode: bypassPermissions
+        mode: acceptEdits
+        allowed_tools:
+            - Read
+            - Bash(git:*)
+            - Bash(scripts/task-state.js:*)
+            - Bash(cd:*)
+        denied_tools:
+            - Write
+            - Edit
 tasks:
     - id: task-report-outcome
       name: report-final-outcome
@@ -75,21 +92,21 @@ tasks:
       name: gate-test
       action: command
       parameters:
-        command: 'cd ${repo_path} && { scripts/task-state.js get ${task_id} verdicts.tester 2>/dev/null || true; } | tr -d "\n"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.tester 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.tester_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906824-25d1e6
     - id: gate-review
       name: gate-review
       action: command
       parameters:
-        command: 'cd ${repo_path} && { scripts/task-state.js get ${task_id} verdicts.reviewer 2>/dev/null || true; } | tr -d "\n"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906826-55d07d
     - id: gate-validate
       name: gate-validate
       action: command
       parameters:
-        command: 'cd ${repo_path} && { scripts/task-state.js get ${task_id} verdicts.validator 2>/dev/null || true; } | tr -d "\n"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906829-499dfe
     - id: task-team-1791906795-ce1d1a69-1791906831-70759d
@@ -97,28 +114,28 @@ tasks:
       description: 'RECIPE=B. Execute Recipe B (MERGE) from your prompt: commit, push, merge feature/${branch_slug} into ${base_branch} in ${repo_path}, delete the branch.'
       type: standard
       agent: agent-team-1791906795-ce1d1a69-specialist-1
-      when: "${tasks.gate-validate.output} == PASS"
+      when: "${tasks.gate-validate.output?} == PASS"
       depends_on:
         - gate-validate
     - id: task-team-1791906795-ce1d1a69-1791906829-499dfe
       name: verify-each-success-metric-in-intent-file-is-met
-      description: Verify each Success Metric in ${intent_file} is met in ${repo_path}; output exactly PASS or FAIL.
+      description: Verify each Success Metric in ${intent_file} is met in ${repo_path}; write the verdict (PASS or FAIL) to verdicts.validator in the state file (the gate reads it there), then output exactly that token.
       type: standard
       agent: agent-team-1791906795-ce1d1a69-tester-4
-      when: "${tasks.gate-review.output} == CLEAR"
+      when: "${tasks.gate-review.output?} == CLEAR"
       depends_on:
         - gate-review
     - id: task-team-1791906795-ce1d1a69-1791906826-55d07d
       name: review-the-diff-of-featurebranch-slug-against
-      description: Review the diff of feature/${branch_slug} against ${intent_file}; output exactly CLEAR, P1 or P0.
+      description: Review the diff of feature/${branch_slug} against ${intent_file}; write the verdict (CLEAR, P1 or P0) to verdicts.reviewer in the state file (the gate reads it there), then output exactly that token.
       type: standard
       agent: agent-team-1791906795-ce1d1a69-reviewer-3
-      when: "${tasks.gate-test.output} == GREEN"
+      when: "${tasks.gate-test.output?} == GREEN"
       depends_on:
         - gate-test
     - id: task-team-1791906795-ce1d1a69-1791906824-25d1e6
       name: run-buildlinttest-for-repo-path-and-output
-      description: Run build/lint/test for ${repo_path} and output exactly GREEN, BUILD_FAIL or TEST_FAIL.
+      description: Run build/lint/test for ${repo_path} and write the verdict (GREEN, BUILD_FAIL or TEST_FAIL) to verdicts.tester in the state file (the gate reads it there), then output exactly that token.
       type: standard
       agent: agent-team-1791906795-ce1d1a69-tester-5
       depends_on:
@@ -137,14 +154,18 @@ tasks:
       agent: agent-team-1791906795-ce1d1a69-specialist-1
 settings:
     max_concurrency: 1
-    timeout: 45m0s
+    timeout: 90m0s
     failure_policy: fail-fast
     cwd: ${repo_path}
     permissions:
+        # Ceiling, not default: agents cannot escalate above it. implementer/tester/validator
+        # need unattended arbitrary build/run commands; git-agent and reviewer narrow themselves.
         mode: bypassPermissions
+        # runtime: copilot (verified 2026-10-20): bypassPermissions agents get --allow-all-tools and NO
+        # deny flags, so this list only applies to acceptEdits agents (git-agent, reviewer). Copilot
+        # cannot express sub-arguments: Bash(git push --force:*) collapses to deny shell(git:*), which
+        # blocks ALL git for those agents. Keep only rules whose first word is safe to deny outright;
+        # git-safety rules for bypass agents live in their prompts.
         denied_tools:
             - Bash(rm -rf:*)
             - Bash(sudo:*)
-            - Bash(git push --force:*)
-            - Bash(git push -f:*)
-            - Bash(git reset --hard:*)

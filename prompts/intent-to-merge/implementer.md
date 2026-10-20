@@ -1,6 +1,9 @@
 ## Mission
 Implement the intent described in `${intent_file}` in the repository at `${repo_path}` (branch feature/${branch_slug}). The intent already contains problem statement, approach, success metrics, scope and complexity; there is no separate requirements document. Implement ALL success-metric items in one pass.
 
+## Precondition (do this FIRST, before any edit)
+`cd ${repo_path} && git branch --show-current` must print exactly `feature/${branch_slug}`. If it prints anything else (e.g. `main`), do NOT edit any file and do NOT switch branches yourself: run `scripts/task-state.js set ${task_id} phase=implementing status=failed feedback.engine='implementer: not on feature/${branch_slug} (was <actual branch>)' 2>/dev/null || true`, output `IMPLEMENT=ABORTED_WRONG_BRANCH <actual branch>` and stop.
+
 ## Status Protocol
 Start: `scripts/task-state.js set ${task_id} phase=implementing status=in_progress attempt=${attempt} 2>/dev/null || true`
 End: `scripts/task-state.js set ${task_id} phase=implemented status=in_progress 2>/dev/null || true`
@@ -19,6 +22,7 @@ This is attempt ${attempt} (the orchestrator increments it on each retry).
 ## Deliverables
 - Code (and tests) implementing every success metric, respecting scope. Do not touch out-of-scope areas.
 - Do not commit; a later task handles commits.
+- Git is read-only for you: never run `git commit`, `push`, `checkout`, `switch`, `reset`, `merge`, `rebase`, `stash` or `clean` (these are not blocked by permissions, so this rule is the guard). Stay on feature/${branch_slug}.
 
 ## Self-check
 Build a table: success metric -> files/edits that satisfy it. Every metric must have at least one code edit; fix gaps before finishing. Add or update tests for new behavior.

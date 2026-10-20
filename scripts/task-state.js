@@ -163,6 +163,20 @@ function main() {
         feedback: {},
       };
     }
+    if (syncing) {
+      const added = Object.keys(intents);
+      if (!added.length) { console.log(JSON.stringify({ synced: 0, added: [] })); return; }
+      for (const k of added) {
+        const bad = intents[k].depends_on.filter((d) => !existing.intents[d] && !intents[d]);
+        if (bad.length) throw new Error(`${k} depends on unknown intent ${bad.join(', ')}`);
+      }
+      const prev = (existing.critical_path || []).filter((k) => existing.intents[k]);
+      existing.intents = { ...existing.intents, ...intents };
+      existing.critical_path = [...prev, ...order.filter((k) => !prev.includes(k))];
+      writeState(existing);
+      console.log(JSON.stringify({ synced: added.length, added, critical_path: existing.critical_path }, null, 2));
+      return;
+    }
     const base = 'main';
     writeState({ schema_version: '1.0', base_branch: base, intents_dir: rel(dir), critical_path: order, intents });
     console.log(JSON.stringify({ created: STATE_FILE, intents: order.length, critical_path: order }, null, 2));

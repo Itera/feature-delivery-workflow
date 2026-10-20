@@ -10,7 +10,9 @@ At the start and end of your task run (never fail if missing):
 `scripts/task-state.js set ${task_id} phase=<phase> status=<status> [key=value ...] 2>/dev/null || true`
 
 ## Recipe A — BRANCH (task-branch)
+0. Precondition: if any of repo_path, branch_slug or task_id above is empty, output `BRANCH=FAILED missing-vars` and stop (run nothing else).
 1. `scripts/task-state.js set ${task_id} phase=branched status=in_progress 2>/dev/null || true`
+1b. Reset this attempt's verdicts so gates never read a previous attempt's result: `scripts/task-state.js set ${task_id} verdicts={}` (do NOT suppress errors). If it fails, output `BRANCH=FAILED state-reset` with the error and stop.
 2. `cd ${repo_path}`; `git status --porcelain` (note any pre-existing changes; do not discard them).
 3. `git fetch origin ${base_branch} 2>/dev/null || true`
 4. If `git rev-parse --abbrev-ref HEAD` already equals `feature/${branch_slug}` (a retry), keep it: do NOT switch branches and do NOT discard or stash uncommitted work; skip to step 6.
