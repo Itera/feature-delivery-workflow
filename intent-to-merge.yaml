@@ -57,7 +57,8 @@ agents:
       type: reviewer
       name: reviewer
       runtime: copilot
-      model: claude-sonnet-5.5
+      # Different model family from the implementer, so the review doesn't share its blind spots.
+      model: gpt-5.6-terra
       prompt: '@file:prompts/intent-to-merge/reviewer.md'
       permissions:
         mode: acceptEdits
