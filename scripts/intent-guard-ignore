@@ -1,0 +1,3 @@
+# Paths the validator may legitimately change while running the app (read by intent-git.sh snapshot/verify).
+# Next.js rewrites this file on every `next dev` / `next build`.
+app/next-env.d.ts

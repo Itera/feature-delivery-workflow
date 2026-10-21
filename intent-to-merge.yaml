@@ -107,9 +107,19 @@ tasks:
       name: gate-validate
       action: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || scripts/intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" >&2; } && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906829-499dfe
+    - id: snapshot-before-validate
+      name: snapshot-before-validate
+      # Tamper guard: the validator runs bypassPermissions, where copilot ignores its Write/Edit denies.
+      # gate-validate rejects a PASS if the working tree changed after this snapshot.
+      action: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+      when: "${tasks.gate-review.output?} == CLEAR"
+      depends_on:
+        - gate-review
     - id: task-team-1791906795-ce1d1a69-1791906831-70759d
       name: merge
       action: command
@@ -126,6 +136,7 @@ tasks:
       when: "${tasks.gate-review.output?} == CLEAR"
       depends_on:
         - gate-review
+        - snapshot-before-validate
     - id: task-team-1791906795-ce1d1a69-1791906826-55d07d
       name: review-the-diff-of-featurebranch-slug-against
       description: Review the diff of feature/${branch_slug} against ${intent_file}; write the verdict (CLEAR, P1 or P0) to verdicts.reviewer in the state file (the gate reads it there), then output exactly that token.
