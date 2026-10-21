@@ -117,7 +117,7 @@ tasks:
       # from lock-tests, and we are on the feature branch. Uses the script from the pre-agent HEAD.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { r=$(printf %s "${tasks.run-tests.output?}"); l=$(printf %s "${tasks.lock-tests.output?}"); g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh check-tests "${task_id}" "${branch_slug}" "${base_branch}" "$l" "$r" >&2 && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && [ "$r" = GREEN ] && printf GREEN; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { r=$(printf %s "${tasks.run-tests.output?}"); l=$(printf %s "${tasks.lock-tests.output?}"); g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh check-tests "${task_id}" "${branch_slug}" "${base_branch}" "$l" "$r" >&2 && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && [ "$r" = GREEN ] && printf GREEN; }; true'
       depends_on:
         - run-tests
         - summarise-test-failure
@@ -127,7 +127,7 @@ tasks:
       name: gate-review
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != CLEAR ] || { g="${tasks.snapshot-before-review.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" reviewer >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != CLEAR ] || { g="${tasks.snapshot-before-review.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" reviewer >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
       depends_on:
         - review
         - snapshot-before-review
@@ -137,7 +137,7 @@ tasks:
       # Same mechanism as snapshot-before-validate; gate-review rejects a CLEAR if HEAD or the tree changed.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
       when: "${tasks.gate-test.output?} == GREEN"
       depends_on:
         - gate-test
@@ -145,7 +145,7 @@ tasks:
       name: gate-validate
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" validator >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" validator >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
       depends_on:
         - validate
         - snapshot-before-validate
@@ -167,7 +167,7 @@ tasks:
       # snapshot lives only in the engine's task output, so the validator can't forge either.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
       when: "${tasks.gate-review.output?} == CLEAR"
       depends_on:
         - gate-review
@@ -202,7 +202,7 @@ tasks:
       # Deterministic test gate (replaces an LLM verdict): runs ${test_command}, prints GREEN|TEST_FAIL|NOT_RUN.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "${test_command}"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "${test_command}"; }; true'
       when: "${tasks.lock-tests.output?}"
       depends_on:
         - implement
@@ -222,7 +222,7 @@ tasks:
       # also the trusted commit whose scripts/intent-git.sh all later test steps execute.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}" test_author'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}" test_author'
       depends_on:
         - branch
     - id: write-tests
@@ -238,7 +238,7 @@ tasks:
       # intent; otherwise prints the hash of all acceptance tests (empty output = implement is skipped).
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh lock-tests "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" "${attempt}"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh lock-tests "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" "${attempt}"; }; true'
       depends_on:
         - write-tests
         - snapshot-before-tests
@@ -255,6 +255,8 @@ tasks:
       type: command
       parameters:
         command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh branch "${task_id}" "${branch_slug}" "${base_branch}"'
+# Command task output = stdout followed by stderr, so every task whose output is read by a when: or a
+# later command sends stderr to .task-state/gates-<task_id>.log (diagnostics live there).
 settings:
     max_concurrency: 1
     timeout: 90m0s

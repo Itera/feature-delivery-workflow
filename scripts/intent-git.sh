@@ -39,7 +39,7 @@ if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
 fi
 feature="feature/$slug"
 state=scripts/task-state.js
-excl=(':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache')
+excl=(':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache' ':(exclude).digital-factory' ':(exclude).digital-factory-outputs')
 # Acceptance tests written by the test author from the intent's Success Metrics (locked for the implementer).
 ACCEPT=':(glob)**/*.acceptance.test.*' 
 
@@ -62,7 +62,7 @@ tree_fingerprint() {
   rm -f "$idx"
   GIT_INDEX_FILE=$idx git read-tree HEAD && GIT_INDEX_FILE=$idx git add -A -- . || rc=1
   if [ $rc -eq 0 ]; then
-    for p in .task-state scripts/task-state.js .copilot-cache ${ign[@]+"${ign[@]}"}; do
+    for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs ${ign[@]+"${ign[@]}"}; do
       GIT_INDEX_FILE=$idx git rm -r -q --cached --ignore-unmatch -- "$p" >/dev/null || { rc=1; break; }
     done
   fi
@@ -180,7 +180,7 @@ merge)
   # Add everything, then unstage the orchestrator's own files. (Exclude pathspecs in `git add` exit 1
   # when the excluded path is also gitignored.)
   git add -A -- . || fail merging MERGE=FAILED git-add
-  for p in .task-state scripts/task-state.js .copilot-cache; do git reset -q -- "$p" 2>/dev/null || true; done
+  for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs; do git reset -q -- "$p" 2>/dev/null || true; done
   bad=$(git diff --cached --name-only \
     | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|(^|/)id_rsa|(^|/)node_modules/|\.log$|(^|/)dist/|(^|/)build/|\.db$' \
     | grep -vE '(^|/)\.env\.example$' | tr '\n' ' ')
