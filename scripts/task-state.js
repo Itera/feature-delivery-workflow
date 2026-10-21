@@ -9,7 +9,8 @@
 //       (agents: atomically record verdict, attempt, phase, status and feedback; with "-" the
 //        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token)
 //   task-state.js list
-//   task-state.js next [max_attempts]   (orchestrator: next eligible intent as JSON, or {action:"done"|"blocked"})
+//   task-state.js next [max_attempts]   (orchestrator: next eligible intent as JSON, or {action:"done"|"blocked"};
+//                                        status=needs_human intents and their dependents are never picked)
 //   task-state.js sync [intents_dir]    (add intents missing from the existing state; defaults to intents_dir in state)
 //   task-state.js init <intents_dir>    (create the state file from intent files; fails if it already exists)
 //
@@ -236,6 +237,7 @@ function main() {
       const e = intents[key];
       if (!e) { waiting.push({ id: key, reason: 'listed in critical_path but has no intents entry' }); continue; }
       if (done(key)) continue;
+      if (e.status === 'needs_human') { waiting.push({ id: key, reason: `needs human: ${(e.feedback || {}).engine || 'see state'}` }); continue; }
       const unmet = (e.depends_on || []).filter((d) => !done(d));
       if (unmet.length) { waiting.push({ id: key, reason: `waiting on: ${unmet.join(', ')}` }); continue; }
       if (attemptsOf(e) >= max) { waiting.push({ id: key, reason: `exhausted ${attemptsOf(e)}/${max} attempts` }); continue; }

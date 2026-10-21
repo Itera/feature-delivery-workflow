@@ -87,7 +87,10 @@ merge)
   bad=$(git diff --cached --name-only \
     | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|(^|/)id_rsa|(^|/)node_modules/|\.log$|(^|/)dist/|(^|/)build/|\.db$' \
     | grep -vE '(^|/)\.env\.example$' | tr '\n' ' ')
-  if [ -n "$bad" ]; then git reset -q; fail merging MERGE=ABORTED_SENSITIVE_FILES "$bad"; fi
+  if [ -n "$bad" ]; then
+    git reset -q
+    fail merging MERGE=ABORTED_SENSITIVE_FILES "${bad}- implementer: delete these files or add them to .gitignore (never commit secrets, keys, logs, databases, dependencies or build output)"
+  fi
   if ! git diff --cached --quiet; then
     git commit -q -m "feat($slug): implement intent $task_id" || fail merging MERGE=FAILED commit
   fi
@@ -97,7 +100,9 @@ merge)
   git checkout -q "$base" || fail merging MERGE=FAILED "checkout:$base"
   if ! git merge -q --no-ff "$feature" -m "Merge $feature"; then
     git merge --abort 2>/dev/null; git checkout -q "$feature"
-    fail merging MERGE=CONFLICT "$feature->$base"
+    # A retry cannot fix this (agents may not merge/rebase): park it for a human; `next` skips needs_human.
+    st phase=merging status=needs_human "feedback.engine=MERGE=CONFLICT $feature->$base: resolve manually (work is committed on $feature)"
+    echo "MERGE=CONFLICT $feature->$base"; exit 1
   fi
   sha=$(git rev-parse HEAD)
   if has_origin; then git push -q origin "$base" || fail merging MERGE=FAILED "push:$base"; fi
