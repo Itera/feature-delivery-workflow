@@ -5,6 +5,9 @@
 // Usage:
 //   task-state.js set <task_id> key=value [key=value ...]   (dotted keys nest: verdicts.tester=GREEN)
 //   task-state.js get <task_id> [key]
+//   task-state.js verdict <task_id> <tester|reviewer|validator> <TOKEN> <attempt> [-]
+//       (agents: atomically record verdict, attempt, phase, status and feedback; with "-" the
+//        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token)
 //   task-state.js list
 //   task-state.js next [max_attempts]   (orchestrator: next eligible intent as JSON, or {action:"done"|"blocked"})
 //   task-state.js sync [intents_dir]    (add intents missing from the existing state; defaults to intents_dir in state)
@@ -62,6 +65,12 @@ function getPath(obj, dotted) {
   return dotted.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
 
+const ROLES = {
+  tester: { phase: 'tested', ok: 'GREEN', tokens: ['GREEN', 'BUILD_FAIL', 'TEST_FAIL'] },
+  reviewer: { phase: 'reviewed', ok: 'CLEAR', tokens: ['CLEAR', 'P0', 'P1'] },
+  validator: { phase: 'validated', ok: 'PASS', tokens: ['PASS', 'FAIL'] },
+};
+
 function main() {
   const [cmd, id, ...rest] = process.argv.slice(2);
 
@@ -79,6 +88,35 @@ function main() {
     entry.updated_at = new Date().toISOString();
     state.intents[id] = entry;
     writeState(state);
+    return;
+  }
+
+  if (cmd === 'verdict') {
+    const [role, token, attemptRaw, fbFlag] = rest;
+    const r = ROLES[role];
+    const usage = 'usage: verdict <task_id> <tester|reviewer|validator> <TOKEN> <attempt> [-]';
+    if (!id || !r) throw new Error(usage);
+    if (!r.tokens.includes(token)) throw new Error(`${role} token must be one of ${r.tokens.join('|')}, got: ${token}`);
+    const attempt = Number(attemptRaw);
+    if (!Number.isInteger(attempt) || attempt < 1) throw new Error(`attempt must be a positive integer, got: ${attemptRaw}`);
+    if (fbFlag !== undefined && fbFlag !== '-') throw new Error(usage);
+    const fb = fbFlag === '-' ? fs.readFileSync(0, 'utf8').trim() : '';
+    const ok = token === r.ok;
+    if (!ok && !fb) throw new Error(`${token} requires feedback for the implementer on stdin (pass "-" and a heredoc)`);
+    const state = readState();
+    state.intents = state.intents || {};
+    const entry = state.intents[id] || { phase: 'pending', status: 'pending', verdicts: {} };
+    setPath(entry, `verdicts.${role}`, token);
+    setPath(entry, `verdicts.${role}_attempt`, attempt);
+    setPath(entry, `feedback.${role}`, ok ? '' : fb);
+    entry.phase = r.phase;
+    entry.status = ok ? 'in_progress' : 'escalated';
+    entry.updated_at = new Date().toISOString();
+    state.intents[id] = entry;
+    writeState(state);
+    const back = getPath((readState().intents || {})[id], `verdicts.${role}`);
+    if (back !== token) throw new Error(`read-back mismatch: stored ${back}, expected ${token}`);
+    console.log(token);
     return;
   }
 
@@ -218,7 +256,7 @@ function main() {
     return;
   }
 
-  throw new Error('usage: task-state.js <set|get|list|next> ...');
+  throw new Error('usage: task-state.js <set|get|verdict|list|next|init|sync> ...');
 }
 
 try {

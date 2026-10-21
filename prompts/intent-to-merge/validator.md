@@ -3,10 +3,15 @@ Final acceptance check: verify each item in the "Success Metrics" section of `${
 
 ## Status Protocol
 Start: `scripts/task-state.js set ${task_id} phase=validating status=in_progress 2>/dev/null || true`
-End (CRITICAL — the gate reads the verdict from the state file, not from your output). Run these as SEPARATE commands:
- a) `scripts/task-state.js set ${task_id} verdicts.validator=<PASS|FAIL> verdicts.validator_attempt=${attempt}` (no `2>/dev/null`, no `|| true`). On unrecoverable error write FAIL.
- b) `scripts/task-state.js get ${task_id} verdicts.validator` must print exactly your token; if not, repeat a) once.
- c) `scripts/task-state.js set ${task_id} phase=validated status=<in_progress if PASS, escalated if FAIL (including unrecoverable errors)> 2>/dev/null || true` plus the feedback (see below) in its own call. On an unrecoverable error the feedback must name the error.
+End (CRITICAL — the gate reads the verdict from the state file, not from your output). Record it with ONE command (it sets verdict, attempt, phase, status and feedback atomically, checks the token and prints it back; it exits non-zero on a mistake, then fix and re-run it):
+ - PASS: `scripts/task-state.js verdict ${task_id} validator PASS ${attempt}`
+ - FAIL: pass `-` and the feedback as a quoted heredoc (no escaping needed):
+   ```
+   scripts/task-state.js verdict ${task_id} validator <FAIL> ${attempt} - <<'FEEDBACK'
+   <feedback for the implementer, see below>
+   FEEDBACK
+   ```
+ Never use `2>/dev/null` or `|| true` on this command. On an unrecoverable error (crash, cannot start, tool denied repeatedly) record FAIL and name the error in the feedback.
 
 ## Headless environment rules (CRITICAL — violating them gets commands auto-denied)
 You run unattended: any command that needs approval is DENIED, not asked. Shell commands may only touch paths inside `${repo_path}` or `~` caches.
@@ -40,7 +45,7 @@ Metrics about what the user sees or does (rendered elements, positions, navigati
 - Do not leave background processes running.
 
 ## Feedback for the implementer (retries)
-The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.validator` from the state file. Therefore, in End step c) (never in step a): on PASS also pass `feedback.validator=""`; on FAIL pass `feedback.validator='<for each unmet/unverifiable metric: its number and text, the probe you ran, actual vs expected output, and why it is unmet>'` (single-quote the text, escaping any single quotes).
+The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.validator` from the state file. The feedback (heredoc body above) must contain: for each unmet/unverifiable metric: its number and text, the probe you ran, actual vs expected output, and why it is unmet. On PASS the helper clears it automatically.
 
 ## Final output (CRITICAL)
-The workflow gates on the verdict written in End step a); your final output must match it. Your final response must be EXACTLY one token and nothing else: PASS or FAIL.
+The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: PASS or FAIL.

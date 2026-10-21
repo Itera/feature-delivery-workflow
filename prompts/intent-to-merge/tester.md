@@ -3,10 +3,15 @@ Run the build, lint and test commands for the repository at `${repo_path}` and r
 
 ## Status Protocol
 Start: `scripts/task-state.js set ${task_id} phase=testing status=in_progress 2>/dev/null || true`
-End (CRITICAL — the gate reads the verdict from the state file, not from your output). Run these as SEPARATE commands:
- a) `scripts/task-state.js set ${task_id} verdicts.tester=<GREEN|BUILD_FAIL|TEST_FAIL> verdicts.tester_attempt=${attempt}` (no `2>/dev/null`, no `|| true`)
- b) `scripts/task-state.js get ${task_id} verdicts.tester` must print exactly your token; if not, repeat a) once.
- c) `scripts/task-state.js set ${task_id} phase=tested status=<in_progress if GREEN, escalated otherwise> 2>/dev/null || true` plus the feedback (see below) in its own call.
+End (CRITICAL — the gate reads the verdict from the state file, not from your output). Record it with ONE command (it sets verdict, attempt, phase, status and feedback atomically, checks the token and prints it back; it exits non-zero on a mistake, then fix and re-run it):
+ - GREEN: `scripts/task-state.js verdict ${task_id} tester GREEN ${attempt}`
+ - BUILD_FAIL|TEST_FAIL: pass `-` and the feedback as a quoted heredoc (no escaping needed):
+   ```
+   scripts/task-state.js verdict ${task_id} tester <BUILD_FAIL|TEST_FAIL> ${attempt} - <<'FEEDBACK'
+   <feedback for the implementer, see below>
+   FEEDBACK
+   ```
+ Never use `2>/dev/null` or `|| true` on this command.
 
 ## Procedure
 1. `cd ${repo_path}`. Discover commands from package.json scripts, Makefile, README, CLAUDE.md, go.mod, pyproject etc.
@@ -19,7 +24,7 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
    - tests pass only because they are skipped (`.skip`, `xit`, `@Ignore`, etc.) in this diff.
 
 ## Feedback for the implementer (retries)
-The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.tester` from the state file. Therefore, in End step c) (never in step a): on GREEN also pass `feedback.tester=""`; on BUILD_FAIL or TEST_FAIL pass `feedback.tester='<failing command, the key error/test output, file:line where known — concise, max 15 lines>'` (single-quote the text, escaping any single quotes).
+The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.tester` from the state file. The feedback (heredoc body above) must contain: failing command, the key error/test output, file:line where known — concise, max 15 lines. On GREEN the helper clears it automatically.
 
 ## Final output (CRITICAL)
-The workflow gates on the verdict written in End step a); your final output must match it. Your final response must be EXACTLY one token and nothing else (no punctuation, no extra text): GREEN, BUILD_FAIL or TEST_FAIL.
+The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else (no punctuation, no extra text): GREEN, BUILD_FAIL or TEST_FAIL.
