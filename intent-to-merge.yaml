@@ -57,10 +57,9 @@ agents:
       model: claude-sonnet-5.5
       prompt: '@file:prompts/intent-to-merge/validator.md'
       permissions:
+        # bypass: needs arbitrary build/run/probe commands. Tool denies would be ignored under copilot
+        # bypass; the real control is snapshot-before-validate + gate-validate (tamper guard).
         mode: bypassPermissions
-        denied_tools:
-            - Write
-            - Edit
     - id: agent-team-1791906795-ce1d1a69-specialist-1
       type: specialist
       name: reporter
@@ -91,38 +90,41 @@ tasks:
         - task-team-1791906795-ce1d1a69-1791906831-70759d
     - id: gate-test
       name: gate-test
-      action: command
+      type: command
       parameters:
         command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.tester 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.tester_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906824-25d1e6
     - id: gate-review
       name: gate-review
-      action: command
+      type: command
       parameters:
         command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906826-55d07d
     - id: gate-validate
       name: gate-validate
-      action: command
+      type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || scripts/intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" >&2; } && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" >&2; }; } && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906829-499dfe
+        - snapshot-before-validate
     - id: snapshot-before-validate
       name: snapshot-before-validate
-      # Tamper guard: the validator runs bypassPermissions, where copilot ignores its Write/Edit denies.
-      # gate-validate rejects a PASS if the working tree changed after this snapshot.
-      action: command
+      # Tamper guard: the validator runs bypassPermissions, where copilot ignores tool denies.
+      # Outputs "<tree> <head>"; gate-validate passes it to verify and rejects a PASS if HEAD moved or
+      # the working tree changed. Both steps run the committed script (git show <head>:...), and the
+      # snapshot lives only in the engine's task output, so the validator can't forge either.
+      type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
       when: "${tasks.gate-review.output?} == CLEAR"
       depends_on:
         - gate-review
     - id: task-team-1791906795-ce1d1a69-1791906831-70759d
       name: merge
-      action: command
+      type: command
       parameters:
         command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh merge "${task_id}" "${branch_slug}" "${base_branch}"'
       when: "${tasks.gate-validate.output?} == PASS"
@@ -161,7 +163,7 @@ tasks:
         - task-team-1791906795-ce1d1a69-1791906820-e47692
     - id: task-team-1791906795-ce1d1a69-1791906820-e47692
       name: branch
-      action: command
+      type: command
       parameters:
         command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh branch "${task_id}" "${branch_slug}" "${base_branch}"'
 settings:
@@ -178,6 +180,7 @@ settings:
         # cannot express sub-arguments: Bash(git push --force:*) collapses to deny shell(git:*), which
         # blocks ALL git for those agents. Keep only rules whose first word is safe to deny outright;
         # git-safety rules for bypass agents live in their prompts.
+        # Effective only for the acceptEdits agents (reviewer, reporter); copilot denies whole commands.
         denied_tools:
-            - Bash(rm -rf:*)
+            - Bash(rm:*)
             - Bash(sudo:*)

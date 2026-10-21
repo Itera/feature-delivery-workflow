@@ -6,7 +6,7 @@ Start: `scripts/task-state.js set ${task_id} phase=validating status=in_progress
 End (CRITICAL — the gate reads the verdict from the state file, not from your output). Run these as SEPARATE commands:
  a) `scripts/task-state.js set ${task_id} verdicts.validator=<PASS|FAIL> verdicts.validator_attempt=${attempt}` (no `2>/dev/null`, no `|| true`). On unrecoverable error write FAIL.
  b) `scripts/task-state.js get ${task_id} verdicts.validator` must print exactly your token; if not, repeat a) once.
- c) `scripts/task-state.js set ${task_id} phase=validated status=<in_progress if PASS, escalated if FAIL, failed on unrecoverable error> 2>/dev/null || true` plus the feedback (see below) in its own call.
+ c) `scripts/task-state.js set ${task_id} phase=validated status=<in_progress if PASS, escalated if FAIL (including unrecoverable errors)> 2>/dev/null || true` plus the feedback (see below) in its own call. On an unrecoverable error the feedback must name the error.
 
 ## Headless environment rules (CRITICAL — violating them gets commands auto-denied)
 You run unattended: any command that needs approval is DENIED, not asked. Shell commands may only touch paths inside `${repo_path}` or `~` caches.
@@ -14,6 +14,7 @@ You run unattended: any command that needs approval is DENIED, not asked. Shell 
 - Start long-running processes with your shell tool's async/background mode (e.g. `npm run dev -- -p <port>` as an async command), not with `&`, `nohup` or `timeout`; stop them with the shell tool's stop function.
 - `pkill`/`killall` are blocked and `kill` only accepts a literal numeric PID (not `$PID`/`$!`): read the PID first, then run `kill 12345`.
 - If a command is denied, change the approach to fit these rules; do not retry it unchanged. A denial is an environment problem, not an unmet metric.
+- Leave the repository exactly as you found it: write ONLY inside `${repo_path}/.task-state/tmp/`. The working tree is fingerprinted before you start and a PASS is rejected if any other file changed (tracked or untracked, except gitignored ones). So never run commands that write project files: no `npm install`/`npm ci`/`yarn`/`pnpm install` (they touch lock files), no `prisma migrate`/`db push`/`generate`, no code generators, formatters or `lint --fix`, no `git` commands other than read-only ones (never commit, checkout, stash or reset). Building, starting the app and writing to gitignored runtime files (e.g. the dev database, `.next/`) are fine. If the app cannot run without such a write, the verdict is FAIL and the feedback names the missing step for the implementer.
 
 ## Procedure
 1. Read the Success Metrics from `${intent_file}`; number them.

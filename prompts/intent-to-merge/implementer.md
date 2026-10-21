@@ -6,13 +6,13 @@ Implement the intent described in `${intent_file}` in the repository at `${repo_
 
 ## Status Protocol
 Start: `scripts/task-state.js set ${task_id} phase=implementing status=in_progress attempt=${attempt} 2>/dev/null || true`
-End: `scripts/task-state.js set ${task_id} phase=implemented status=in_progress 2>/dev/null || true`
+End: `scripts/task-state.js set ${task_id} phase=implemented status=in_progress verdicts.implementer=DONE verdicts.implementer_attempt=${attempt} feedback={} 2>/dev/null || true` (this also clears the feedback you have now addressed; run it only when you are done).
 Never fail your task if the script is missing or errors.
 
 ## Attempt and feedback
 This is attempt ${attempt} (the orchestrator increments it on each retry).
 - If attempt is 1: ignore this section (no feedback exists yet).
-- If attempt is greater than 1: a previous attempt failed. BEFORE changing code run `scripts/task-state.js get ${task_id} feedback` (JSON with optional keys `tester`, `reviewer`, `validator`; missing keys = nothing to fix there). Then run `scripts/task-state.js set ${task_id} feedback={} 2>/dev/null || true` so stale feedback is cleared. Work on the EXISTING changes on feature/${branch_slug} (they are uncommitted in the working tree; check `git status` and `git diff`): do not start over. Fix exactly the reported problems — failing build/test output (tester), P0/P1 findings (reviewer), unmet success metrics with their evidence (validator) — and make no unrelated changes. In your final summary, list each feedback item and the edit that resolves it. If the state file or feedback is missing, say so and proceed with a normal full implementation.
+- If attempt is greater than 1: a previous attempt failed. BEFORE changing code run `scripts/task-state.js get ${task_id} feedback` (JSON with optional keys `tester`, `reviewer`, `validator`, `engine`; missing or empty keys = nothing to fix there; `engine` describes a crash or a git/merge step failure of the previous run). Do not clear the feedback yourself; the End command does that once you are done. Work on the EXISTING changes on feature/${branch_slug} (check `git status` and `git diff ${base_branch}`; they are usually uncommitted, but after a failed merge step they may be committed on the branch): do not start over. Fix exactly the reported problems — failing build/test output (tester), P0/P1 findings (reviewer), unmet success metrics with their evidence (validator) — and make no unrelated changes. In your final summary, list each feedback item and the edit that resolves it. If the state file or feedback is missing, say so and proceed with a normal full implementation.
 
 ## Warmup Protocol
 1. Read `${intent_file}` fully. List every Success Metric and the scope boundaries (in/out of scope).

@@ -2,11 +2,16 @@
 # Deterministic git steps for the intent-to-merge workflow (run from the repo root).
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
-#   intent-git.sh snapshot|verify <task_id> <branch_slug> <base_branch>
+#   intent-git.sh snapshot <task_id> <branch_slug> <base_branch>                 prints "<tree> <head>"
+#   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head>
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
-#       status=escalated + feedback.validator) if any non-ignored file changed since. Paths listed in
-#       scripts/intent-guard-ignore (one pathspec per line, # comments) are left out of the fingerprint.
+#       status=escalated + verdicts.validator=MODIFIED_FILES|GUARD_ERROR) if HEAD moved or any
+#       non-ignored file changed since. Paths listed in scripts/intent-guard-ignore at <head> (one
+#       pathspec per line, # comments) are left out of the fingerprint. Nothing is stored in the repo:
+#       the workflow carries "<tree> <head>" in the snapshot task's output and runs both steps from
+#       the committed copy of this script (git show <head>:scripts/intent-git.sh), so an agent cannot
+#       forge the snapshot or patch the checker.
 # Prints one result line on stdout; exits non-zero on failure (after recording status=failed).
 set -uo pipefail
 
@@ -26,20 +31,17 @@ excl=(':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copi
 st() { "$state" set "$task_id" "$@" >/dev/null 2>&1 || true; }
 fail() { st "phase=$1" status=failed "feedback.engine=$2: $3"; echo "$2 $3"; exit 1; }
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
-guard_file=".task-state/guard-$task_id.tree"
 
 # Tree hash of the whole working tree (tracked + untracked, honouring .gitignore and info/exclude),
-# built in a throwaway index so the real index is never touched.
+# built in a throwaway index so the real index is never touched. $1 = commit to read the ignore list from.
 tree_fingerprint() {
   mkdir -p .task-state || return 1
   local idx=".task-state/guard-idx.$$" rc=0 t="" p l
   local -a ign=()
-  if [ -f scripts/intent-guard-ignore ]; then
-    while IFS= read -r l || [ -n "$l" ]; do
-      l=${l%%#*}; l=$(printf %s "$l" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      [ -n "$l" ] && ign+=("$l")
-    done < scripts/intent-guard-ignore
-  fi
+  while IFS= read -r l || [ -n "$l" ]; do
+    l=${l%%#*}; l=$(printf %s "$l" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -n "$l" ] && ign+=("$l")
+  done < <(git show "$1:scripts/intent-guard-ignore" 2>/dev/null)
   rm -f "$idx"
   GIT_INDEX_FILE=$idx git read-tree HEAD && GIT_INDEX_FILE=$idx git add -A -- . || rc=1
   if [ $rc -eq 0 ]; then
@@ -71,7 +73,8 @@ branch)
     fi
   fi
   [ "$(git branch --show-current)" = "$feature" ] || fail branched BRANCH=FAILED "not-on:$feature"
-  st phase=branched status=in_progress "branch=$feature" feedback.engine='""'
+  # feedback (incl. feedback.engine from a crashed attempt) is left for the implementer, who clears it when done.
+  st phase=branched status=in_progress "branch=$feature"
   echo "BRANCH=$feature BASE=$base"
   ;;
 merge)
@@ -106,15 +109,20 @@ merge)
   ;;
 snapshot)
   [ "$(git branch --show-current)" = "$feature" ] || fail validating GUARD=FAILED "not-on:$feature"
-  mkdir -p .task-state && rm -f "$guard_file"
-  t=$(tree_fingerprint) && [ -n "$t" ] || fail validating GUARD=FAILED snapshot
-  printf '%s\n' "$t" > "$guard_file" || fail validating GUARD=FAILED snapshot-write
-  echo "GUARD=SNAPSHOT TREE=$t"
+  h=$(git rev-parse HEAD) || fail validating GUARD=FAILED rev-parse
+  t=$(tree_fingerprint "$h") && [ -n "$t" ] || fail validating GUARD=FAILED snapshot
+  echo "$t $h"
   ;;
 verify)
-  before=$(cat "$guard_file" 2>/dev/null)
-  [ -n "$before" ] || { st status=escalated phase=validated verdicts.validator=GUARD_ERROR "feedback.validator=tamper guard: no snapshot to compare against"; echo "GUARD=NO_SNAPSHOT"; exit 1; }
-  after=$(tree_fingerprint) && [ -n "$after" ] || { st status=escalated phase=validated verdicts.validator=GUARD_ERROR "feedback.validator=tamper guard: could not fingerprint the tree"; echo "GUARD=ERROR"; exit 1; }
+  before=${5:-}; head_before=${6:-}
+  guard_err() { st status=escalated phase=validated verdicts.validator=GUARD_ERROR "feedback.validator=tamper guard: $1"; echo "GUARD=ERROR $1"; exit 1; }
+  [ -n "$before" ] && [ -n "$head_before" ] || guard_err "no snapshot to compare against"
+  head_now=$(git rev-parse HEAD 2>/dev/null)
+  if [ "$head_now" != "$head_before" ] || [ "$(git branch --show-current)" != "$feature" ]; then
+    st status=escalated phase=validated verdicts.validator=MODIFIED_FILES "feedback.validator=The validator reported PASS but moved HEAD or switched branches during validation (now $(git branch --show-current)@$head_now, expected $feature@$head_before), so the PASS was rejected."
+    echo "GUARD=HEAD_MOVED"; exit 1
+  fi
+  after=$(tree_fingerprint "$head_before") && [ -n "$after" ] || guard_err "could not fingerprint the tree"
   if [ "$before" != "$after" ]; then
     changed=$(git diff-tree -r --name-status "$before" "$after" | tr '\t' ' ' | paste -sd ';' -)
     st status=escalated phase=validated verdicts.validator=MODIFIED_FILES "feedback.validator=The validator reported PASS but modified files during validation (it must not change code), so the PASS was rejected. Changed: $changed. Review these changes; keep them only if they belong to the intent."
