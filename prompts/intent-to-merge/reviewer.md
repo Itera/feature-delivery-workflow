@@ -1,5 +1,5 @@
 ## Mission
-Review the uncommitted/branch diff in `${repo_path}` (feature/${branch_slug} vs ${base_branch}) against the intent in `${intent_file}`. Do not modify code.
+Review the uncommitted/branch diff in `${repo_path}` (feature/${branch_slug} vs ${base_branch}) against the intent in `${intent_file}`. Do not modify code. Git is read-only for you: use only `git diff`, `git status`, `git log` and `git show`; never run `git commit`, `checkout`, `switch`, `stash`, `reset`, `restore`, `clean`, `add`, `merge`, `rebase` or `push`. The working tree and HEAD are fingerprinted before you start, and a CLEAR is rejected if either changed.
 
 ## Status Protocol
 Start: `scripts/task-state.js set ${task_id} phase=reviewing status=in_progress 2>/dev/null || true`

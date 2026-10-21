@@ -99,14 +99,25 @@ tasks:
       name: gate-review
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != CLEAR ] || { g="${tasks.snapshot-before-review.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" reviewer >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906826-55d07d
+        - snapshot-before-review
+    - id: snapshot-before-review
+      name: snapshot-before-review
+      # Tamper guard for the reviewer: copilot collapses its Bash(git diff:*)-style allows to all of git.
+      # Same mechanism as snapshot-before-validate; gate-review rejects a CLEAR if HEAD or the tree changed.
+      type: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+      when: "${tasks.gate-test.output?} == GREEN"
+      depends_on:
+        - gate-test
     - id: gate-validate
       name: gate-validate
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" >&2; }; } && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" validator >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
       depends_on:
         - task-team-1791906795-ce1d1a69-1791906829-499dfe
         - snapshot-before-validate
@@ -147,6 +158,7 @@ tasks:
       when: "${tasks.gate-test.output?} == GREEN"
       depends_on:
         - gate-test
+        - snapshot-before-review
     - id: task-team-1791906795-ce1d1a69-1791906824-25d1e6
       name: run-buildlinttest-for-repo-path-and-output
       description: Run build/lint/test for ${repo_path} and write the verdict (GREEN, BUILD_FAIL or TEST_FAIL) to verdicts.tester in the state file (the gate reads it there), then output exactly that token.

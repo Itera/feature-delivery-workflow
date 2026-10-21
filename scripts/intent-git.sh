@@ -3,10 +3,10 @@
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
 #   intent-git.sh snapshot <task_id> <branch_slug> <base_branch>                 prints "<tree> <head>"
-#   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head>
+#   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer]
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
-#       status=escalated + verdicts.validator=MODIFIED_FILES|GUARD_ERROR) if HEAD moved or any
+#       status=escalated + verdicts.<role>=MODIFIED_FILES|GUARD_ERROR) if HEAD moved or any
 #       non-ignored file changed since. Paths listed in scripts/intent-guard-ignore at <head> (one
 #       pathspec per line, # comments) are left out of the fingerprint. Nothing is stored in the repo:
 #       the workflow carries "<tree> <head>" in the snapshot task's output and runs both steps from
@@ -114,18 +114,23 @@ snapshot)
   echo "$t $h"
   ;;
 verify)
-  before=${5:-}; head_before=${6:-}
-  guard_err() { st status=escalated phase=validated verdicts.validator=GUARD_ERROR "feedback.validator=tamper guard: $1"; echo "GUARD=ERROR $1"; exit 1; }
+  before=${5:-}; head_before=${6:-}; role=${7:-validator}
+  case "$role" in
+    validator) ph=validated; tok=PASS ;;
+    reviewer)  ph=reviewed;  tok=CLEAR ;;
+    *) echo "verify: unknown role $role" >&2; exit 2 ;;
+  esac
+  guard_err() { st status=escalated "phase=$ph" "verdicts.$role=GUARD_ERROR" "feedback.$role=tamper guard: $1"; echo "GUARD=ERROR $1"; exit 1; }
   [ -n "$before" ] && [ -n "$head_before" ] || guard_err "no snapshot to compare against"
   head_now=$(git rev-parse HEAD 2>/dev/null)
   if [ "$head_now" != "$head_before" ] || [ "$(git branch --show-current)" != "$feature" ]; then
-    st status=escalated phase=validated verdicts.validator=MODIFIED_FILES "feedback.validator=The validator reported PASS but moved HEAD or switched branches during validation (now $(git branch --show-current)@$head_now, expected $feature@$head_before), so the PASS was rejected."
+    st status=escalated "phase=$ph" "verdicts.$role=MODIFIED_FILES" "feedback.$role=The $role reported $tok but moved HEAD or switched branches while it ran (now $(git branch --show-current)@$head_now, expected $feature@$head_before), so the $tok was rejected."
     echo "GUARD=HEAD_MOVED"; exit 1
   fi
   after=$(tree_fingerprint "$head_before") && [ -n "$after" ] || guard_err "could not fingerprint the tree"
   if [ "$before" != "$after" ]; then
     changed=$(git diff-tree -r --name-status "$before" "$after" | tr '\t' ' ' | paste -sd ';' -)
-    st status=escalated phase=validated verdicts.validator=MODIFIED_FILES "feedback.validator=The validator reported PASS but modified files during validation (it must not change code), so the PASS was rejected. Changed: $changed. Review these changes; keep them only if they belong to the intent."
+    st status=escalated "phase=$ph" "verdicts.$role=MODIFIED_FILES" "feedback.$role=The $role reported $tok but modified files while it ran (it must not change code), so the $tok was rejected. Changed: $changed. Review these changes; keep them only if they belong to the intent."
     echo "GUARD=MODIFIED $changed"
     exit 1
   fi
