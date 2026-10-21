@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Deterministic git steps for the intent-to-merge workflow (run from the repo root).
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
-#       (first aborts any merge/rebase/cherry-pick/revert left in progress by an interrupted run)
+#       (first aborts any merge/rebase/cherry-pick/revert left in progress by an interrupted run and
+#        stops processes recorded in .task-state/pids-* that are still running, see kill_recorded)
+#   intent-git.sh cleanup <task_id> <branch_slug> <base_branch>  stop processes in .task-state/pids-<task_id>
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
 #   intent-git.sh snapshot <task_id> <branch_slug> <base_branch>                 prints "<tree> <head>"
 #   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer]
@@ -22,7 +24,7 @@ for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do un
 
 cmd=${1:-}; task_id=${2:-}; slug=${3:-}; base=${4:-}
 if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
-  echo "usage: intent-git.sh branch|merge|snapshot|verify <task_id> <branch_slug> <base_branch> (all required)" >&2
+  echo "usage: intent-git.sh branch|merge|snapshot|verify|cleanup <task_id> <branch_slug> <base_branch> (all required)" >&2
   exit 2
 fi
 feature="feature/$slug"
@@ -56,9 +58,39 @@ tree_fingerprint() {
   return $rc
 }
 
+# Stop processes an agent recorded in .task-state/pids-* (one PID per line) and left running, e.g. dev
+# servers after a validator crash. A PID is only killed if its working directory is inside this repo and
+# it is not an ancestor of this script (the engine/orchestrator also run here). $1 = file glob.
+proc_cwd() {
+  if [ -r "/proc/$1/cwd" ]; then readlink "/proc/$1/cwd"
+  else lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; fi
+}
+kill_recorded() {
+  local root f pid c anc="" a=$$ n=0 i
+  root=$(pwd -P)
+  while [ -n "$a" ] && [ "$a" -gt 1 ] 2>/dev/null; do anc="$anc $a "; a=$(ps -o ppid= -p "$a" 2>/dev/null | tr -d ' '); done
+  for f in $1; do
+    [ -f "$f" ] || continue
+    while IFS= read -r pid || [ -n "$pid" ]; do
+      pid=$(printf %s "$pid" | tr -cd 0-9)
+      [ -n "$pid" ] && [ "$pid" -gt 1 ] && kill -0 "$pid" 2>/dev/null || continue
+      case "$anc" in *" $pid "*) continue ;; esac
+      c=$(proc_cwd "$pid")
+      case "$c/" in "$root"/*) ;; *) continue ;; esac
+      kill "$pid" 2>/dev/null && n=$((n + 1))
+      for i in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    done < "$f"
+    rm -f "$f"
+  done
+  [ "$n" -gt 0 ] && echo "CLEANUP: stopped $n leftover process(es)" >&2
+  return 0
+}
+
 case "$cmd" in
 branch)
   st phase=branched status=in_progress
+  kill_recorded '.task-state/pids-*'
   # Recover from a run killed mid-operation (e.g. inside `merge`): abort it so the repo is usable again.
   gd=$(git rev-parse --git-dir) || fail branched BRANCH=FAILED no-git-dir
   for op in merge:MERGE_HEAD rebase:rebase-merge rebase:rebase-apply cherry-pick:CHERRY_PICK_HEAD revert:REVERT_HEAD; do
@@ -149,6 +181,10 @@ verify)
     exit 1
   fi
   echo "GUARD=UNCHANGED"
+  ;;
+cleanup)
+  kill_recorded ".task-state/pids-$task_id"
+  echo "CLEANUP=OK"
   ;;
 *)
   echo "unknown command: $cmd" >&2; exit 2 ;;

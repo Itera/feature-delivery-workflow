@@ -121,6 +121,16 @@ tasks:
       depends_on:
         - validate
         - snapshot-before-validate
+        - cleanup-after-validate
+    - id: cleanup-after-validate
+      name: cleanup-after-validate
+      # Backstop for the validator: stop dev servers it recorded in .task-state/pids-<task_id> but left
+      # running (crash/timeout). Only kills PIDs whose cwd is inside the repo. branch does the same for all ids.
+      type: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh cleanup "${task_id}" "${branch_slug}" "${base_branch}"'
+      depends_on:
+        - validate
     - id: snapshot-before-validate
       name: snapshot-before-validate
       # Tamper guard: the validator runs bypassPermissions, where copilot ignores tool denies.
