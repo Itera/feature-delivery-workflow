@@ -3,6 +3,7 @@
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
 #       (first aborts any merge/rebase/cherry-pick/revert left in progress by an interrupted run and
 #        stops processes recorded in .task-state/pids-* that are still running, see kill_recorded)
+#   intent-git.sh park   <task_id> <branch_slug> <base_branch>   WIP-commit an exhausted intent (sensitive files -> stash)
 #   intent-git.sh cleanup <task_id> <branch_slug> <base_branch>  stop processes in .task-state/pids-<task_id>
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
 #   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]   prints "<tree> <head> <trust> <state_hash>"
@@ -42,7 +43,7 @@ for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do un
 
 cmd=${1:-}; task_id=${2:-}; slug=${3:-}; base=${4:-}
 if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
-  echo "usage: intent-git.sh branch|merge|snapshot|verify|gate|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
+  echo "usage: intent-git.sh branch|merge|park|snapshot|verify|gate|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
   exit 2
 fi
 feature="feature/$slug"
@@ -158,6 +159,18 @@ protected_changes() {
   git cat-file -e "$TRUST:$state" 2>/dev/null && p+=("$state")
   { git diff --name-only "$TRUST" -- "${p[@]}"; git ls-files -o --exclude-standard -- "${p[@]}"; } | sort -u | paste -sd ' ' -
 }
+# Unstage the orchestrator's own files after `git add -A` (exclude pathspecs in `git add` exit 1 when
+# the excluded path is also gitignored).
+unstage_internal() {
+  local p
+  for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs; do git reset -q -- "$p" 2>/dev/null || true; done
+}
+# Staged files that must never be committed (secrets, keys, logs, databases, dependencies, build output).
+sensitive_staged() {
+  git diff --cached --name-only \
+    | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|(^|/)id_rsa|(^|/)node_modules/|\.log$|(^|/)dist/|(^|/)build/|\.db$' \
+    | grep -vE '(^|/)\.env\.example$'
+}
 role_exclude() { [ "$1" = test_author ] && printf '%s' "$ACCEPT"; }
 
 # Tamper guard comparison shared by verify and lock-tests. Args: before head_before role.
@@ -233,10 +246,8 @@ merge)
   # Add everything, then unstage the orchestrator's own files. (Exclude pathspecs in `git add` exit 1
   # when the excluded path is also gitignored.)
   git add -A -- . || fail merging MERGE=FAILED git-add
-  for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs; do git reset -q -- "$p" 2>/dev/null || true; done
-  bad=$(git diff --cached --name-only \
-    | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|(^|/)id_rsa|(^|/)node_modules/|\.log$|(^|/)dist/|(^|/)build/|\.db$' \
-    | grep -vE '(^|/)\.env\.example$' | tr '\n' ' ')
+  unstage_internal
+  bad=$(sensitive_staged | tr '\n' ' ')
   if [ -n "$bad" ]; then
     git reset -q
     fail merging MERGE=ABORTED_SENSITIVE_FILES "${bad}- implementer: delete these files or add them to .gitignore (never commit secrets, keys, logs, databases, dependencies or build output)"
@@ -347,6 +358,28 @@ gate)
   [ "$v" = "$pass" ] && { do_verify "${7:-}" "${8:-}" "$role" >&2; echo "GUARD=UNCHANGED" >&2; }
   [ "$(git branch --show-current)" = "$feature" ] || { echo "GATE: not on $feature" >&2; exit 1; }
   printf %s "$v"
+  ;;
+park)
+  # Orchestrator, after the last failed attempt: commit the half-done work on the feature branch as WIP
+  # and return to the base branch. Sensitive files are not committed; they go to a git stash instead.
+  # Does not change the intent's status.
+  [ "$(git branch --show-current)" = "$feature" ] || { echo "PARK=SKIPPED not on $feature"; exit 0; }
+  git add -A -- . || { echo "PARK=FAILED git-add"; exit 1; }
+  unstage_internal
+  stashed=none; bad=()
+  while IFS= read -r f; do [ -n "$f" ] && bad+=("$f"); done < <(sensitive_staged)
+  if [ ${#bad[@]} -gt 0 ]; then
+    git reset -q
+    git stash push -q -u -m "intent $task_id: sensitive files kept out of the WIP commit" -- "${bad[@]}" || { echo "PARK=FAILED stash"; exit 1; }
+    stashed=$(git rev-parse -q --verify refs/stash)
+    git add -A -- . && unstage_internal
+    [ -z "$(sensitive_staged)" ] || { git reset -q; echo "PARK=FAILED sensitive files still staged"; exit 1; }
+  fi
+  if ! git diff --cached --quiet; then
+    git commit -q -m "WIP (unmerged, needs human): $task_id" || { echo "PARK=FAILED commit"; exit 1; }
+  fi
+  git checkout -q "$base" || { echo "PARK=FAILED checkout:$base (tree: $(git status --porcelain | head -3 | paste -sd ' ' -))"; exit 1; }
+  echo "PARK=OK BRANCH=$feature STASH=$stashed${bad[*]:+ (kept out: ${bad[*]})}"
   ;;
 cleanup)
   kill_recorded ".task-state/pids-$task_id"
