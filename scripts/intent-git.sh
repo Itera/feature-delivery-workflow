@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deterministic git steps for the intent-to-merge workflow (run from the repo root).
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
+#       (first aborts any merge/rebase/cherry-pick/revert left in progress by an interrupted run)
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
 #   intent-git.sh snapshot <task_id> <branch_slug> <base_branch>                 prints "<tree> <head>"
 #   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer]
@@ -58,6 +59,14 @@ tree_fingerprint() {
 case "$cmd" in
 branch)
   st phase=branched status=in_progress
+  # Recover from a run killed mid-operation (e.g. inside `merge`): abort it so the repo is usable again.
+  gd=$(git rev-parse --git-dir) || fail branched BRANCH=FAILED no-git-dir
+  for op in merge:MERGE_HEAD rebase:rebase-merge rebase:rebase-apply cherry-pick:CHERRY_PICK_HEAD revert:REVERT_HEAD; do
+    if [ -e "$gd/${op#*:}" ]; then
+      git "${op%%:*}" --abort >/dev/null 2>&1 || fail branched BRANCH=FAILED "cannot-abort-${op%%:*}"
+      echo "RECOVERED: aborted interrupted ${op%%:*}" >&2
+    fi
+  done
   "$state" set "$task_id" 'verdicts={}' >/dev/null || fail branched BRANCH=FAILED state-reset
   has_origin && { git fetch -q origin "$base" 2>/dev/null || true; }
   cur=$(git branch --show-current)
