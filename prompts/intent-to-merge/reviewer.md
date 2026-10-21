@@ -15,7 +15,9 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
 
 ## Review checklist
 - Type errors / obvious logic bugs
-- Missing test coverage for new behavior
+- Acceptance tests (`*.acceptance.test.*`, written from the Success Metrics by a separate test author before implementation): does every Success Metric have a test with meaningful, specific assertions? A metric with no test, or a test that asserts something contrary to the intent = P1.
+- Test integrity: changes that skip, exclude or neutralise tests (`.skip`/`.only`, edits to the test script, runner config or test discovery, mocks that bypass the code under test) = P0.
+- Missing test coverage for other new behavior
 - Security: input validation, injection, secrets or credentials in code
 - Basic accessibility (labels, alt text, keyboard/focus) only if frontend code is touched
 - Scope creep: changes outside the intent's scope

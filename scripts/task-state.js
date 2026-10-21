@@ -5,7 +5,7 @@
 // Usage:
 //   task-state.js set <task_id> key=value [key=value ...]   (dotted keys nest: verdicts.tester=GREEN)
 //   task-state.js get <task_id> [key]
-//   task-state.js verdict <task_id> <tester|reviewer|validator> <TOKEN> <attempt> [-]
+//   task-state.js verdict <task_id> <test_author|implementer|tester|reviewer|validator> <TOKEN> <attempt> [-]
 //       (agents: atomically record verdict, attempt, phase, status and feedback; with "-" the
 //        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token)
 //   task-state.js list
@@ -67,6 +67,8 @@ function getPath(obj, dotted) {
 }
 
 const ROLES = {
+  test_author: { phase: 'tests_written', ok: 'DONE', tokens: ['DONE', 'BLOCKED'] },
+  implementer: { phase: 'implemented', ok: 'DONE', tokens: ['DONE', 'TEST_DISPUTE'] },
   tester: { phase: 'tested', ok: 'GREEN', tokens: ['GREEN', 'BUILD_FAIL', 'TEST_FAIL'] },
   reviewer: { phase: 'reviewed', ok: 'CLEAR', tokens: ['CLEAR', 'P0', 'P1'] },
   validator: { phase: 'validated', ok: 'PASS', tokens: ['PASS', 'FAIL'] },
@@ -95,7 +97,7 @@ function main() {
   if (cmd === 'verdict') {
     const [role, token, attemptRaw, fbFlag] = rest;
     const r = ROLES[role];
-    const usage = 'usage: verdict <task_id> <tester|reviewer|validator> <TOKEN> <attempt> [-]';
+    const usage = `usage: verdict <task_id> <${Object.keys(ROLES).join('|')}> <TOKEN> <attempt> [-]`;
     if (!id || !r) throw new Error(usage);
     if (!r.tokens.includes(token)) throw new Error(`${role} token must be one of ${r.tokens.join('|')}, got: ${token}`);
     const attempt = Number(attemptRaw);

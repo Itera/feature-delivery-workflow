@@ -18,7 +18,7 @@ You orchestrate; you never implement, test, review or merge anything yourself. T
 `$ARGUMENTS` = the folder with the intent markdown files (absolute, or relative to REPO), e.g. `/intent-orchestrator planning/intents`. It is only needed to create the state file; once the state exists, the folder is remembered in `intents_dir` and the argument may be omitted.
 
 ## State file contract
-Top level: `base_branch` (always `main`), `intents_dir`, `critical_path` (ordered intent ids). Per intent `intents.<id>`: `intent_file` (absolute, or relative to REPO), `depends_on` (ids), `status`, `attempts` (number), `branch_slug` (default = id), and `feedback` (written by the workflow's tester/reviewer/validator when they fail). `status=completed` means merged.
+Top level: `base_branch` (always `main`), `intents_dir`, `critical_path` (ordered intent ids). Per intent `intents.<id>`: `intent_file` (absolute, or relative to REPO), `depends_on` (ids), `status`, `attempts` (number), `branch_slug` (default = id), and `feedback` (written by the workflow's steps when they fail: test_author, implementer (TEST_DISPUTE), tester, reviewer, validator, engine). `status=completed` means merged.
 
 ## Procedure
 

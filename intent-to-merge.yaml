@@ -13,15 +13,38 @@ variables:
     repo_path: ""
     task_id: intent
     attempt: "1"
+    # Fixed test gate, run from the repo root; its exit code is the test verdict. It is embedded in a
+    # double-quoted shell argument, so it must not contain double quotes (use single quotes instead).
+    test_command: cd app && npm run build && npm test
 agents:
+    - id: test-author
+      type: tester
+      name: test-author
+      runtime: copilot
+      # Different model family from the implementer/reviewer, so tests don't share their blind spots.
+      model: gpt-5.3-codex
+      prompt: '@file:prompts/intent-to-merge/test-author.md'
+      permissions:
+        # bypass: must run the test runner. It may only write *.acceptance.test.* files; enforced by
+        # snapshot-before-tests + lock-tests (tool denies are not enforced under copilot bypass).
+        mode: bypassPermissions
     - id: tester
       type: tester
       name: tester
       runtime: copilot
       model: claude-sonnet-5.5
+      # Only summarises a failed run-tests log into feedback.tester; the verdict is the command's exit code.
       prompt: '@file:prompts/intent-to-merge/tester.md'
       permissions:
-        mode: bypassPermissions
+        mode: acceptEdits
+        allowed_tools:
+            - Read
+            - Grep
+            - Glob
+            - Bash(scripts/task-state.js:*)
+        denied_tools:
+            - Write
+            - Edit
     - id: implementer
       type: coder
       name: implementer
@@ -84,17 +107,22 @@ tasks:
       type: standard
       agent: reporter
       depends_on:
-        - test
-        - review
-        - validate
+        - gate-test
+        - gate-review
+        - gate-validate
         - merge
     - id: gate-test
       name: gate-test
+      # GREEN only if run-tests (engine-held output) was GREEN, the acceptance tests still match the hash
+      # from lock-tests, and we are on the feature branch. Uses the script from the pre-agent HEAD.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && { v=$(scripts/task-state.js get "${task_id}" verdicts.tester 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.tester_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && printf %s "$v"; }; true'
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { r=$(printf %s "${tasks.run-tests.output?}"); l=$(printf %s "${tasks.lock-tests.output?}"); g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh check-tests "${task_id}" "${branch_slug}" "${base_branch}" "$l" "$r" >&2 && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && [ "$r" = GREEN ] && printf GREEN; }; true'
       depends_on:
-        - test
+        - run-tests
+        - summarise-test-failure
+        - lock-tests
+        - snapshot-before-tests
     - id: gate-review
       name: gate-review
       type: command
@@ -169,20 +197,59 @@ tasks:
       depends_on:
         - gate-test
         - snapshot-before-review
-    - id: test
-      name: test
-      description: Run build/lint/test for ${repo_path} and write the verdict (GREEN, BUILD_FAIL or TEST_FAIL) to verdicts.tester in the state file (the gate reads it there), then output exactly that token.
-      type: standard
-      agent: tester
+    - id: run-tests
+      name: run-tests
+      # Deterministic test gate (replaces an LLM verdict): runs ${test_command}, prints GREEN|TEST_FAIL|NOT_RUN.
+      type: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "${test_command}"; }; true'
+      when: "${tasks.lock-tests.output?}"
       depends_on:
         - implement
+        - lock-tests
+        - snapshot-before-tests
+    - id: summarise-test-failure
+      name: summarise-test-failure
+      description: Summarise the failed test log into feedback.tester, following your prompt.
+      type: standard
+      agent: tester
+      when: "${tasks.run-tests.output?} == TEST_FAIL"
+      depends_on:
+        - run-tests
+    - id: snapshot-before-tests
+      name: snapshot-before-tests
+      # Fingerprint of everything except *.acceptance.test.*, taken before any agent runs. Its <head> is
+      # also the trusted commit whose scripts/intent-git.sh all later test steps execute.
+      type: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}" test_author'
+      depends_on:
+        - branch
+    - id: write-tests
+      name: write-tests
+      description: Write acceptance tests for the Success Metrics of ${intent_file}, following your prompt.
+      type: standard
+      agent: test-author
+      depends_on:
+        - snapshot-before-tests
+    - id: lock-tests
+      name: lock-tests
+      # Rejects the test author's work if it changed anything but *.acceptance.test.* or wrote none for this
+      # intent; otherwise prints the hash of all acceptance tests (empty output = implement is skipped).
+      type: command
+      parameters:
+        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh lock-tests "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" "${attempt}"; }; true'
+      depends_on:
+        - write-tests
+        - snapshot-before-tests
     - id: implement
       name: implement
       description: Implement every success metric of the intent at ${intent_file} in ${repo_path} on branch feature/${branch_slug}, following your prompt.
       type: standard
       agent: implementer
+      when: "${tasks.lock-tests.output?}"
       depends_on:
-        - branch
+        - lock-tests
     - id: branch
       name: branch
       type: command
