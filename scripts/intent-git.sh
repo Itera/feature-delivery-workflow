@@ -5,7 +5,7 @@
 #        stops processes recorded in .task-state/pids-* that are still running, see kill_recorded)
 #   intent-git.sh cleanup <task_id> <branch_slug> <base_branch>  stop processes in .task-state/pids-<task_id>
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
-#   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]          prints "<tree> <head>"
+#   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]   prints "<tree> <head> <trust> <state_hash>"
 #   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer|test_author]
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
@@ -23,8 +23,16 @@
 #   intent-git.sh run-tests <task_id> <slug> <base> <attempt> <test_command>
 #       Deterministic test gate: run <test_command> from the repo root if the implementer finished,
 #       log to .task-state/test-<task_id>.log, record verdicts.tester, print GREEN|TEST_FAIL|NOT_RUN.
-#   intent-git.sh check-tests <task_id> <slug> <base> <lock_hash> <run_result>
-#       Exit 1 (recording verdicts.tester=MODIFIED_TESTS) if the acceptance tests changed since lock-tests.
+#   intent-git.sh check-tests <task_id> <slug> <base> "<accept_hash> <setup_hash>" <run_result>
+#       Exit 1 (recording verdicts.tester=MODIFIED_TESTS|MODIFIED_TEST_SETUP) if the acceptance tests or
+#       the test setup (package.json test scripts, test runner config) changed since lock-tests.
+#   intent-git.sh gate <task_id> <slug> <base> reviewer|validator <attempt> <tree> <head>
+#       Print the role's verdict for this attempt; a passing verdict only if the tamper guard is clean.
+# Trust: the workflow resolves the base commit once, before any agent runs (snapshot-before-tests, field
+# <trust>), and runs every later step with INTENT_TRUST=<trust>: this script comes from that commit, and so
+# do task-state.js (when tracked; otherwise its hash must equal INTENT_STATE_HASH) and the guard's ignore
+# list. Changes to the loop's own files ($PROTECTED) on the branch fail the run, and merge refuses if the
+# base branch moved during the run.
 # Prints one result line on stdout; exits non-zero on failure (after recording status=failed).
 set -uo pipefail
 
@@ -34,16 +42,36 @@ for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do un
 
 cmd=${1:-}; task_id=${2:-}; slug=${3:-}; base=${4:-}
 if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
-  echo "usage: intent-git.sh branch|merge|snapshot|verify|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
+  echo "usage: intent-git.sh branch|merge|snapshot|verify|gate|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
   exit 2
 fi
 feature="feature/$slug"
 state=scripts/task-state.js
 excl=(':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache' ':(exclude).digital-factory' ':(exclude).digital-factory-outputs')
 # Acceptance tests written by the test author from the intent's Success Metrics (locked for the implementer).
-ACCEPT=':(glob)**/*.acceptance.test.*' 
+ACCEPT=':(glob)**/*.acceptance.test.*'
+# Test setup locked together with the acceptance tests: (pre|post)test* scripts of every package.json and
+# test runner config files. The implementer cannot make the acceptance tests skip by changing these.
+SETUP_CFG=(':(glob)**/vitest.config.*' ':(glob)**/vitest.workspace.*' ':(glob)**/jest.config.*' ':(glob)**/.mocharc*'
+  ':(glob)**/playwright.config.*' ':(glob)**/karma.conf.*' ':(glob)**/ava.config.*' ':(glob)**/.nycrc*' ':(glob)**/.c8rc*'
+  ':(glob)**/pytest.ini' ':(glob)**/conftest.py')
+# The loop's own files: an intent must never change them (they decide whether its work is accepted).
+PROTECTED=(scripts/intent-git.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
+TRUST=${INTENT_TRUST:-}
+STATE_HASH=${INTENT_STATE_HASH:-}
 
-st() { "$state" set "$task_id" "$@" >/dev/null 2>&1 || true; }
+# Run task-state.js: the committed copy at $TRUST when it is tracked there, else the working copy, which
+# must then be unchanged since the run started (an agent could otherwise forge verdicts through it).
+ts() {
+  if [ -n "$TRUST" ] && git cat-file -e "$TRUST:$state" 2>/dev/null; then
+    git show "$TRUST:$state" | node - "$@"; return
+  fi
+  if [ -n "$STATE_HASH" ] && [ "$STATE_HASH" != - ] && [ "$(git hash-object -- "$state" 2>/dev/null)" != "$STATE_HASH" ]; then
+    echo "TAMPERED: $state changed during the run; refusing to use it" >&2; return 3
+  fi
+  "$state" "$@"
+}
+st() { ts set "$task_id" "$@" >/dev/null 2>&1 || true; }
 fail() { st "phase=$1" status=failed "feedback.engine=$2: $3"; echo "$2 $3"; exit 1; }
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
 
@@ -58,7 +86,7 @@ tree_fingerprint() {
   while IFS= read -r l || [ -n "$l" ]; do
     l=${l%%#*}; l=$(printf %s "$l" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -n "$l" ] && ign+=("$l")
-  done < <(git show "$rev:scripts/intent-guard-ignore" 2>/dev/null)
+  done < <(git show "${TRUST:-$rev}:scripts/intent-guard-ignore" 2>/dev/null)
   rm -f "$idx"
   GIT_INDEX_FILE=$idx git read-tree HEAD && GIT_INDEX_FILE=$idx git add -A -- . || rc=1
   if [ $rc -eq 0 ]; then
@@ -111,6 +139,25 @@ accept_hash() {
   [ -n "$list" ] || return 1
   printf %s "$list" | git hash-object --stdin
 }
+# Hash over the test setup (see SETUP_CFG); always prints a hash.
+setup_hash() {
+  local f list=""
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    list+="$f $(node -e 'let o={};try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scripts||{};for(const k of Object.keys(s).sort())if(/^(pre|post)?test($|:)/.test(k))o[k]=s[k]}catch(e){o="unparsable"}process.stdout.write(JSON.stringify(o))' "$f")"$'\n'
+  done < <(git ls-files -co --exclude-standard -- ':(glob)**/package.json' | sort -u)
+  while IFS= read -r f; do
+    if [ -f "$f" ]; then list+="$f $(git hash-object -- "$f")"$'\n'; fi
+  done < <(git ls-files -co --exclude-standard -- "${SETUP_CFG[@]}" | sort -u)
+  printf %s "$list" | git hash-object --stdin
+}
+# Protected loop files changed vs $TRUST (committed, uncommitted or untracked); prints them space-separated.
+protected_changes() {
+  [ -n "$TRUST" ] || return 0
+  local -a p=("${PROTECTED[@]}")
+  git cat-file -e "$TRUST:$state" 2>/dev/null && p+=("$state")
+  { git diff --name-only "$TRUST" -- "${p[@]}"; git ls-files -o --exclude-standard -- "${p[@]}"; } | sort -u | paste -sd ' ' -
+}
 role_exclude() { [ "$1" = test_author ] && printf '%s' "$ACCEPT"; }
 
 # Tamper guard comparison shared by verify and lock-tests. Args: before head_before role.
@@ -155,7 +202,7 @@ branch)
       echo "RECOVERED: aborted interrupted ${op%%:*}" >&2
     fi
   done
-  "$state" set "$task_id" 'verdicts={}' >/dev/null || fail branched BRANCH=FAILED state-reset
+  ts set "$task_id" 'verdicts={}' >/dev/null || fail branched BRANCH=FAILED state-reset
   has_origin && { git fetch -q origin "$base" 2>/dev/null || true; }
   cur=$(git branch --show-current)
   if [ "$cur" != "$feature" ]; then
@@ -177,6 +224,12 @@ branch)
 merge)
   st phase=merging status=in_progress
   [ "$(git branch --show-current)" = "$feature" ] || fail merging MERGE=FAILED "not-on:$feature"
+  if [ -n "$TRUST" ] && [ "$(git rev-parse "$base")" != "$TRUST" ]; then
+    st phase=merging status=needs_human "feedback.engine=MERGE=BASE_MOVED $base moved during the run (was $TRUST, now $(git rev-parse --short "$base")); something other than this run committed to it. Check $base, then retry with status=pending attempts=0."
+    echo "MERGE=BASE_MOVED"; exit 1
+  fi
+  pc=$(protected_changes)
+  [ -z "$pc" ] || fail merging MERGE=ABORTED_PROTECTED_FILES "$pc - implementer: revert these files to $base (git checkout $base -- <file>, delete new ones); intents must not change the dev loop itself"
   # Add everything, then unstage the orchestrator's own files. (Exclude pathspecs in `git add` exit 1
   # when the excluded path is also gitignored.)
   git add -A -- . || fail merging MERGE=FAILED git-add
@@ -214,7 +267,9 @@ snapshot)
   h=$(git rev-parse HEAD) || fail validating GUARD=FAILED rev-parse
   ex=$(role_exclude "${5:-}")
   t=$(tree_fingerprint "$h" ${ex:+"$ex"}) && [ -n "$t" ] || fail validating GUARD=FAILED snapshot
-  echo "$t $h"
+  tr=${TRUST:-$(git rev-parse "$base")} || fail validating GUARD=FAILED rev-parse-base
+  sth=${STATE_HASH:-$(git hash-object -- "$state" 2>/dev/null || echo -)}
+  echo "$t $h $tr $sth"
   ;;
 verify)
   do_verify "${5:-}" "${6:-}" "${7:-validator}"
@@ -222,7 +277,7 @@ verify)
   ;;
 lock-tests)
   attempt=${7:-}
-  v=$("$state" get "$task_id" verdicts.test_author 2>/dev/null); a=$("$state" get "$task_id" verdicts.test_author_attempt 2>/dev/null)
+  v=$(ts get "$task_id" verdicts.test_author 2>/dev/null); a=$(ts get "$task_id" verdicts.test_author_attempt 2>/dev/null)
   [ "$v" = DONE ] && [ "$a" = "$attempt" ] || { echo "LOCK=NO test author verdict '$v' (attempt '$a', expected DONE/$attempt)" >&2; exit 1; }
   do_verify "${5:-}" "${6:-}" test_author >&2
   mine=$( { git diff --name-only "$base" -- "$ACCEPT"; git ls-files -o --exclude-standard -- "$ACCEPT"; } | sort -u)
@@ -231,15 +286,21 @@ lock-tests)
     echo "LOCK=NO_TESTS" >&2; exit 1
   fi
   h=$(accept_hash) || { echo "LOCK=NO_HASH" >&2; exit 1; }
+  su=$(setup_hash) || { echo "LOCK=NO_SETUP_HASH" >&2; exit 1; }
   st phase=tests_written status=in_progress
-  printf %s "$h"
+  printf '%s %s' "$h" "$su"
   ;;
 run-tests)
   attempt=${5:-}; tcmd=${6:-}
   [ -n "$tcmd" ] || { printf NOT_RUN; echo "run-tests: empty test_command" >&2; exit 1; }
   [ "$(git branch --show-current)" = "$feature" ] || { printf NOT_RUN; echo "run-tests: not on $feature" >&2; exit 1; }
-  v=$("$state" get "$task_id" verdicts.implementer 2>/dev/null); a=$("$state" get "$task_id" verdicts.implementer_attempt 2>/dev/null)
+  v=$(ts get "$task_id" verdicts.implementer 2>/dev/null); a=$(ts get "$task_id" verdicts.implementer_attempt 2>/dev/null)
   [ "$v" = DONE ] && [ "$a" = "$attempt" ] || { printf NOT_RUN; echo "run-tests: implementer verdict '$v' (attempt '$a')" >&2; exit 0; }
+  pc=$(protected_changes)
+  if [ -n "$pc" ]; then
+    st phase=tested status=escalated verdicts.tester=MODIFIED_PROTECTED "verdicts.tester_attempt=$attempt" "feedback.tester=These files belong to the dev loop and must not be changed by an intent: $pc. Implementer: revert them to $base (git checkout $base -- <file>; delete new files)."
+    printf PROTECTED; echo "run-tests: protected files changed: $pc" >&2; exit 0
+  fi
   st phase=testing status=in_progress
   log=.task-state/test-$task_id.log
   mkdir -p .task-state
@@ -259,19 +320,33 @@ run-tests)
   fi
   ;;
 check-tests)
-  lock=${5:-}; res=${6:-}
-  [ -n "$lock" ] || { echo "CHECK=NO_LOCK" >&2; exit 1; }
+  read -r lock lock_setup <<<"${5:-}"; res=${6:-}
+  [ -n "$lock" ] && [ -n "$lock_setup" ] || { echo "CHECK=NO_LOCK" >&2; exit 1; }
   now=$(accept_hash)
   if [ "$now" != "$lock" ]; then
     files=$( { git diff --name-only "$base" -- "$ACCEPT"; git ls-files -o --exclude-standard -- "$ACCEPT"; } | sort -u | paste -sd ' ' -)
     st status=escalated phase=tested verdicts.tester=MODIFIED_TESTS "feedback.tester=The implementer changed, added, renamed or deleted *.acceptance.test.* files after they were locked (acceptance tests: $files). The implementer must never touch them: make the tests pass by implementing the behaviour, or record TEST_DISPUTE. Test author: restore your tests."
     echo "CHECK=MODIFIED_TESTS" >&2; exit 1
   fi
+  if [ "$(setup_hash)" != "$lock_setup" ]; then
+    files=$( { git diff --name-only "${TRUST:-$base}" -- ':(glob)**/package.json' "${SETUP_CFG[@]}"; git ls-files -o --exclude-standard -- ':(glob)**/package.json' "${SETUP_CFG[@]}"; } | sort -u | paste -sd ' ' -)
+    st status=escalated phase=tested verdicts.tester=MODIFIED_TEST_SETUP "feedback.tester=The implementer changed the test setup after the acceptance tests were locked: a (pre|post)test script in package.json or a test runner config file (candidates: $files). Implementer: revert those changes (other package.json edits such as dependencies are fine); the tests must run unchanged."
+    echo "CHECK=MODIFIED_TEST_SETUP" >&2; exit 1
+  fi
   # The engine-held run result is authoritative; never let a GREEN in the state file outlive a failed run.
-  if [ "$res" != GREEN ] && [ "$("$state" get "$task_id" verdicts.tester 2>/dev/null)" = GREEN ]; then
+  if [ "$res" != GREEN ] && [ "$(ts get "$task_id" verdicts.tester 2>/dev/null)" = GREEN ]; then
     st verdicts.tester=TEST_FAIL status=escalated
   fi
   echo "CHECK=OK"
+  ;;
+gate)
+  role=${5:-}; attempt=${6:-}
+  case "$role" in reviewer) pass=CLEAR ;; validator) pass=PASS ;; *) echo "gate: unknown role $role" >&2; exit 2 ;; esac
+  v=$(ts get "$task_id" "verdicts.$role" 2>/dev/null); a=$(ts get "$task_id" "verdicts.${role}_attempt" 2>/dev/null)
+  [ -n "$v" ] && [ "$a" = "$attempt" ] || { echo "GATE: no $role verdict for attempt $attempt ('$v', attempt '$a')" >&2; exit 1; }
+  [ "$v" = "$pass" ] && { do_verify "${7:-}" "${8:-}" "$role" >&2; echo "GUARD=UNCHANGED" >&2; }
+  [ "$(git branch --show-current)" = "$feature" ] || { echo "GATE: not on $feature" >&2; exit 1; }
+  printf %s "$v"
   ;;
 cleanup)
   kill_recorded ".task-state/pids-$task_id"

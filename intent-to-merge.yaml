@@ -13,8 +13,8 @@ variables:
     repo_path: ""
     task_id: intent
     attempt: "1"
-    # Fixed test gate, run from the repo root; its exit code is the test verdict. It is embedded in a
-    # double-quoted shell argument, so it must not contain double quotes (use single quotes instead).
+    # Fixed test gate, run from the repo root with sh -c; its exit code is the test verdict. Passed
+    # verbatim through a quoted heredoc, so any quoting is fine (single line only).
     test_command: cd app && npm run build && npm test
 agents:
     - id: test-author
@@ -113,11 +113,20 @@ tasks:
         - merge
     - id: gate-test
       name: gate-test
-      # GREEN only if run-tests (engine-held output) was GREEN, the acceptance tests still match the hash
-      # from lock-tests, and we are on the feature branch. Uses the script from the pre-agent HEAD.
+      # GREEN only if run-tests (engine-held output) was GREEN, the acceptance tests and the test setup
+      # (package.json test scripts, runner config) still match the hashes from lock-tests, and we are on
+      # the feature branch.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { r=$(printf %s "${tasks.run-tests.output?}"); l=$(printf %s "${tasks.lock-tests.output?}"); g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh check-tests "${task_id}" "${branch_slug}" "${base_branch}" "$l" "$r" >&2 && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && [ "$r" = GREEN ] && printf GREEN; }; true'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-tests.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          r=$(printf %s "${tasks.run-tests.output?}"); l=$(printf %s "${tasks.lock-tests.output?}")
+          bash -c "$s" intent-git.sh check-tests "${task_id}" "${branch_slug}" "${base_branch}" "$l" "$r" >&2 && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && [ "$r" = GREEN ] && printf GREEN
+          true
       depends_on:
         - run-tests
         - summarise-test-failure
@@ -127,7 +136,14 @@ tasks:
       name: gate-review
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { v=$(scripts/task-state.js get "${task_id}" verdicts.reviewer 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.reviewer_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != CLEAR ] || { g="${tasks.snapshot-before-review.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" reviewer >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-review.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          bash -c "$s" intent-git.sh gate "${task_id}" "${branch_slug}" "${base_branch}" reviewer "${attempt}" "$1" "$2"
+          true
       depends_on:
         - review
         - snapshot-before-review
@@ -137,15 +153,29 @@ tasks:
       # Same mechanism as snapshot-before-validate; gate-review rejects a CLEAR if HEAD or the tree changed.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-tests.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 1; }
+          bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"
       when: "${tasks.gate-test.output?} == GREEN"
       depends_on:
+        - snapshot-before-tests
         - gate-test
     - id: gate-validate
       name: gate-validate
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { v=$(scripts/task-state.js get "${task_id}" verdicts.validator 2>/dev/null); a=$(scripts/task-state.js get "${task_id}" verdicts.validator_attempt 2>/dev/null); [ "$a" = "${attempt}" ] && { [ "$v" != PASS ] || { g="${tasks.snapshot-before-validate.output?}"; set -- $g; r=$2; [ -n "$r" ] || r=HEAD; s=$(git show "$r:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh verify "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" validator >&2; }; } && [ "$(git branch --show-current)" = "feature/${branch_slug}" ] && printf %s "$v"; }; true'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-validate.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          bash -c "$s" intent-git.sh gate "${task_id}" "${branch_slug}" "${base_branch}" validator "${attempt}" "$1" "$2"
+          true
       depends_on:
         - validate
         - snapshot-before-validate
@@ -156,28 +186,47 @@ tasks:
       # running (crash/timeout). Only kills PIDs whose cwd is inside the repo. branch does the same for all ids.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh cleanup "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          set -- ${tasks.snapshot-before-validate.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          bash -c "$s" intent-git.sh cleanup "${task_id}" "${branch_slug}" "${base_branch}"
       depends_on:
+        - snapshot-before-validate
         - validate
     - id: snapshot-before-validate
       name: snapshot-before-validate
       # Tamper guard: the validator runs bypassPermissions, where copilot ignores tool denies.
       # Outputs "<tree> <head>"; gate-validate passes it to verify and rejects a PASS if HEAD moved or
-      # the working tree changed. Both steps run the committed script (git show <head>:...), and the
+      # the working tree changed. Both steps run the trusted script (git show <trust>:...), and the
       # snapshot lives only in the engine's task output, so the validator can't forge either.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-review.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 1; }
+          bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}"
       when: "${tasks.gate-review.output?} == CLEAR"
       depends_on:
+        - snapshot-before-review
         - gate-review
     - id: merge
       name: merge
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh merge "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          set -- ${tasks.snapshot-before-validate.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 1; }
+          bash -c "$s" intent-git.sh merge "${task_id}" "${branch_slug}" "${base_branch}"
       when: "${tasks.gate-validate.output?} == PASS"
       depends_on:
+        - snapshot-before-validate
         - gate-validate
     - id: validate
       name: validate
@@ -202,7 +251,19 @@ tasks:
       # Deterministic test gate (replaces an LLM verdict): runs ${test_command}, prints GREEN|TEST_FAIL|NOT_RUN.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "${test_command}"; }; true'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-tests.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          # Quoted heredoc: test_command is passed verbatim (any quotes, $ or backticks).
+          tc=$(cat <<'__INTENT_TEST_COMMAND__'
+          ${test_command}
+          __INTENT_TEST_COMMAND__
+            )
+          bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "$tc"
+          true
       when: "${tasks.lock-tests.output?}"
       depends_on:
         - implement
@@ -218,11 +279,16 @@ tasks:
         - run-tests
     - id: snapshot-before-tests
       name: snapshot-before-tests
-      # Fingerprint of everything except *.acceptance.test.*, taken before any agent runs. Its <head> is
-      # also the trusted commit whose scripts/intent-git.sh all later test steps execute.
+      # Fingerprint of everything except *.acceptance.test.*, taken before any agent runs. Output
+      # "<tree> <head> <trust> <state_hash>": <trust> is the base branch commit right now; every later
+      # command step runs scripts/intent-git.sh (and task-state.js) from it, never from the working tree,
+      # and passes it on through the review/validate snapshots. See "Trust" in scripts/intent-git.sh.
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && h=$(git rev-parse HEAD) && s=$(git show "$h:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}" test_author'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          s=$(git show "${base_branch}:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh snapshot "${task_id}" "${branch_slug}" "${base_branch}" test_author
       depends_on:
         - branch
     - id: write-tests
@@ -238,7 +304,14 @@ tasks:
       # intent; otherwise prints the hash of all acceptance tests (empty output = implement is skipped).
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state && exec 2>>".task-state/gates-${task_id}.log" && { g="${tasks.snapshot-before-tests.output?}"; set -- $g; [ -n "$2" ] && s=$(git show "$2:scripts/intent-git.sh") && [ -n "$s" ] && bash -c "$s" intent-git.sh lock-tests "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" "${attempt}"; }; true'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
+          exec 2>>".task-state/gates-${task_id}.log"
+          set -- ${tasks.snapshot-before-tests.output?}
+          export INTENT_TRUST="$3" INTENT_STATE_HASH="$4"
+          [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 0; }
+          bash -c "$s" intent-git.sh lock-tests "${task_id}" "${branch_slug}" "${base_branch}" "$1" "$2" "${attempt}"
+          true
       depends_on:
         - write-tests
         - snapshot-before-tests
@@ -254,9 +327,14 @@ tasks:
       name: branch
       type: command
       parameters:
-        command: '[ -n "${repo_path}" ] && cd "${repo_path}" && scripts/intent-git.sh branch "${task_id}" "${branch_slug}" "${base_branch}"'
+        command: |
+          [ -n "${repo_path}" ] && cd "${repo_path}" || exit 1
+          # Script and task-state.js from the committed base branch, never from the working tree.
+          export INTENT_TRUST=$(git rev-parse "${base_branch}") && s=$(git show "$INTENT_TRUST:scripts/intent-git.sh") && [ -n "$s" ] || { echo "BRANCH=FAILED scripts/intent-git.sh is not committed on ${base_branch}"; exit 1; }
+          bash -c "$s" intent-git.sh branch "${task_id}" "${branch_slug}" "${base_branch}"
 # Command task output = stdout followed by stderr, so every task whose output is read by a when: or a
-# later command sends stderr to .task-state/gates-<task_id>.log (diagnostics live there).
+# later command sends stderr to .task-state/gates-<task_id>.log (diagnostics live there). Write only
+# $name (not ${name}) for shell variables in commands: ${...} is the engine's interpolation syntax.
 settings:
     max_concurrency: 1
     timeout: 90m0s
