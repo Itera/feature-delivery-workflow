@@ -13,6 +13,15 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
    ```
  Never use `2>/dev/null` or `|| true` on this command. On an unrecoverable error (crash, cannot start, tool denied repeatedly) record FAIL and name the error in the feedback.
 
+## Intent issue (rare: it stops this intent until a human edits it)
+Record INTENT_ISSUE instead of FAIL only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
+```
+scripts/task-state.js verdict ${task_id} validator INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+<quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
+FEEDBACK
+```
+An unverifiable metric caused by the environment (no browser, app will not start) is a FAIL, not an intent issue.
+
 ## Headless environment rules (CRITICAL — violating them gets commands auto-denied)
 You run unattended: any command that needs approval is DENIED, not asked. Shell commands may only touch paths inside `${repo_path}` or `~` caches.
 - Never reference `/tmp` or any other path outside the repo (no `>/tmp/x.log`, no `rm /tmp/...`). Use the scratch dir `${repo_path}/.task-state/tmp/` instead (`mkdir -p` it first; it is git-excluded and never committed).
@@ -49,4 +58,4 @@ Metrics about what the user sees or does (rendered elements, positions, navigati
 The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.validator` from the state file. The feedback (heredoc body above) must contain: for each unmet/unverifiable metric: its number and text, the probe you ran, actual vs expected output, and why it is unmet. On PASS the helper clears it automatically.
 
 ## Final output (CRITICAL)
-The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: PASS or FAIL.
+The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: PASS, FAIL or INTENT_ISSUE.

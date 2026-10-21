@@ -6,7 +6,8 @@
 #   intent-git.sh park   <task_id> <branch_slug> <base_branch>   WIP-commit an exhausted intent (sensitive files -> stash)
 #   intent-git.sh cleanup <task_id> <branch_slug> <base_branch>  stop processes in .task-state/pids-<task_id>
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
-#   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]   prints "<tree> <head> <trust> <state_hash>"
+#   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]   prints "<tree> <head> <trust> <state_hash> <git_meta>"
+#   intent-git.sh git-meta <task_id> <branch_slug> <base_branch>   prints the git metadata hash (see git_meta_hash)
 #   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer|test_author]
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
@@ -34,6 +35,10 @@
 # do task-state.js (when tracked; otherwise its hash must equal INTENT_STATE_HASH) and the guard's ignore
 # list. Changes to the loop's own files ($PROTECTED) on the branch fail the run, and merge refuses if the
 # base branch moved during the run.
+# Git metadata: hooks and git config can make our own git commands run code (hooks, core.fsmonitor, filter
+# drivers, ...), outside every check above. Their hash (<git_meta>) is taken before any agent runs (passed in
+# by the orchestrator as INTENT_META, else computed by the first snapshot); every later command re-checks it
+# before running git and, on a mismatch, sets status=needs_human (feedback.engine=GIT_META_CHANGED) and exits 1.
 # Prints one result line on stdout; exits non-zero on failure (after recording status=failed).
 set -uo pipefail
 
@@ -43,7 +48,7 @@ for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do un
 
 cmd=${1:-}; task_id=${2:-}; slug=${3:-}; base=${4:-}
 if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
-  echo "usage: intent-git.sh branch|merge|park|snapshot|verify|gate|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
+  echo "usage: intent-git.sh branch|merge|park|snapshot|git-meta|verify|gate|cleanup|lock-tests|run-tests|check-tests <task_id> <branch_slug> <base_branch> (all required)" >&2
   exit 2
 fi
 feature="feature/$slug"
@@ -57,9 +62,10 @@ SETUP_CFG=(':(glob)**/vitest.config.*' ':(glob)**/vitest.workspace.*' ':(glob)**
   ':(glob)**/playwright.config.*' ':(glob)**/karma.conf.*' ':(glob)**/ava.config.*' ':(glob)**/.nycrc*' ':(glob)**/.c8rc*'
   ':(glob)**/pytest.ini' ':(glob)**/conftest.py')
 # The loop's own files: an intent must never change them (they decide whether its work is accepted).
-PROTECTED=(scripts/intent-git.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
+PROTECTED=(scripts/intent-git.sh scripts/orchestrate-tick.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
 TRUST=${INTENT_TRUST:-}
 STATE_HASH=${INTENT_STATE_HASH:-}
+META=${INTENT_META:-}
 
 # Run task-state.js: the committed copy at $TRUST when it is tracked there, else the working copy, which
 # must then be unchanged since the run started (an agent could otherwise forge verdicts through it).
@@ -75,6 +81,25 @@ ts() {
 st() { ts set "$task_id" "$@" >/dev/null 2>&1 || true; }
 fail() { st "phase=$1" status=failed "feedback.engine=$2: $3"; echo "$2 $3"; exit 1; }
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
+
+# Hash of what lives outside the working tree but makes git run code or changes what git sees: config of
+# every scope (hooksPath, fsmonitor, filter/diff drivers, aliases, ...; branch.* is left out, `push -u` and
+# `branch -d` rewrite it), the hooks dirs (default and core.hooksPath: content and executable bit) and
+# info/attributes + info/exclude. Reads files only; runs no hook, filter or fsmonitor.
+git_meta_hash() {
+  local gd hp d f
+  gd=$(git rev-parse --git-common-dir) && hp=$(git rev-parse --git-path hooks) || return 1
+  {
+    git config --list --show-scope --show-origin --includes 2>/dev/null | awk -F'\t' '$3 !~ /^branch\./'
+    for d in "$gd/hooks" "$hp"; do
+      [ -d "$d" ] || continue
+      find -L "$d" -type f 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+        printf '== %s %s\n' "$f" "$([ -x "$f" ] && echo x || echo -)"; cat "$f" 2>/dev/null
+      done
+    done
+    for f in "$gd/info/attributes" "$gd/info/exclude"; do [ -f "$f" ] && { printf '== %s\n' "$f"; cat "$f"; }; done
+  } | git hash-object --no-filters --stdin
+}
 
 # Tree hash of the whole working tree (tracked + untracked, honouring .gitignore and info/exclude),
 # built in a throwaway index so the real index is never touched. $1 = commit to read the ignore list from;
@@ -204,6 +229,21 @@ do_verify() {
 }
 
 case "$cmd" in
+git-meta) git_meta_hash; exit ;;
+snapshot|branch|park) ;;
+*) [ -n "$TRUST" ] && [ -z "$META" ] && { echo "GIT_META=MISSING: no INTENT_META baseline for $cmd" >&2; exit 1; } ;;
+esac
+# Before any other git command (a planted hook or config could run code inside them).
+if [ -n "$META" ]; then
+  now_meta=$(git_meta_hash)
+  if [ "$now_meta" != "$META" ]; then
+    st status=needs_human "feedback.engine=GIT_META_CHANGED: git hooks or git config changed during the run (before $cmd). They can make git run arbitrary code, so the run was stopped and nothing more was executed. Inspect .git/hooks, core.hooksPath, .git/info/ and 'git config --list --show-origin', revert anything unexpected, then retry with status=pending attempts=0."
+    echo "GIT_META=CHANGED (before $cmd)" >&2
+    exit 1
+  fi
+fi
+
+case "$cmd" in
 branch)
   st phase=branched status=in_progress
   kill_recorded '.task-state/pids-*'
@@ -280,7 +320,8 @@ snapshot)
   t=$(tree_fingerprint "$h" ${ex:+"$ex"}) && [ -n "$t" ] || fail validating GUARD=FAILED snapshot
   tr=${TRUST:-$(git rev-parse "$base")} || fail validating GUARD=FAILED rev-parse-base
   sth=${STATE_HASH:-$(git hash-object -- "$state" 2>/dev/null || echo -)}
-  echo "$t $h $tr $sth"
+  mh=${META:-$(git_meta_hash)} && [ -n "$mh" ] || fail validating GUARD=FAILED git-meta
+  echo "$t $h $tr $sth $mh"
   ;;
 verify)
   do_verify "${5:-}" "${6:-}" "${7:-validator}"

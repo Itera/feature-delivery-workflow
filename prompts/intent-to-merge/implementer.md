@@ -15,6 +15,15 @@ scripts/task-state.js verdict ${task_id} implementer TEST_DISPUTE ${attempt} - <
 FEEDBACK
 ```
 
+## Intent issue (rare: it stops this intent until a human edits it)
+Record INTENT_ISSUE instead of DONE (implement everything else first) only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
+```
+scripts/task-state.js verdict ${task_id} implementer INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+<quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
+FEEDBACK
+```
+A test that contradicts a correct intent is a TEST_DISPUTE, not an intent issue.
+
 ## Attempt and feedback
 This is attempt ${attempt} (the orchestrator increments it on each retry).
 - If attempt is 1: ignore this section (no feedback exists yet).
@@ -24,7 +33,7 @@ This is attempt ${attempt} (the orchestrator increments it on each retry).
 A separate test author has already written acceptance tests for this intent from its Success Metrics: every `*.acceptance.test.*` file (list them with `git ls-files -co --exclude-standard -- ':(glob)**/*.acceptance.test.*'`; the ones for this intent are new or changed vs ${base_branch}). They define done, and the test gate runs `${test_command}` and uses its exit code.
 - Make them pass by implementing the behaviour and the interface documented at the top of each test file (module paths, exports, signatures, routes, status codes).
 - Never create, edit, rename or delete ANY `*.acceptance.test.*` file. Never change the test setup: `test`, `pretest`, `posttest` or `test:*` scripts in any package.json, or test runner config files (vitest/jest/playwright/karma/ava config, .mocharc, .nycrc, .c8rc, pytest.ini, conftest.py). Both are fingerprinted when the tests are locked and checked after you finish; any change rejects the whole run. Other package.json edits (e.g. dependencies) are fine.
-- Never change the dev loop's own files: `scripts/intent-git.sh`, `scripts/task-state.js`, `scripts/intent-guard-ignore`, `intent-to-merge.yaml`, `prompts/intent-to-merge/`, `.claude/skills/intent-orchestrator/`. Any change there fails the run before the tests are executed.
+- Never change the dev loop's own files: `scripts/intent-git.sh`, `scripts/orchestrate-tick.sh`, `scripts/task-state.js`, `scripts/intent-guard-ignore`, `intent-to-merge.yaml`, `prompts/intent-to-merge/`, `.claude/skills/intent-orchestrator/`. Any change there fails the run before the tests are executed.
 - You may add your own extra tests in ordinary test files (not `*.acceptance.test.*`).
 - If an acceptance test contradicts the intent or cannot be satisfied (e.g. it requires an interface that conflicts with code the intent tells you to keep), do not work around it or weaken your implementation to game it. Implement everything else, then record TEST_DISPUTE (see Status Protocol) instead of DONE. The test author fixes the test on the next attempt.
 

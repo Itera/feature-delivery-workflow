@@ -110,10 +110,16 @@ ts set "$id" "attempts=$n" status=in_progress >/dev/null || stop "cannot record 
 say "[$id #$n/$MAX_ATTEMPTS] starting (branch feature/$slug)"
 
 # --- 5. Run the workflow (own process group, so a timeout can stop the agents too) ---------------
+# Trusted intent-git.sh (from the base branch, kept in memory) and the git hooks/config baseline: the
+# workflow re-checks it before each of its git steps, and this script checks it again after the run.
+trust=$(git rev-parse "$base") && IG=$(git show "$trust:scripts/intent-git.sh") && [ -n "$IG" ] \
+  || stop "scripts/intent-git.sh is not committed on $base" 1
+ig() { INTENT_TRUST=$trust bash -c "$IG" intent-git.sh "$@"; }
+meta0=$(ig git-meta "$id" "$slug" "$base") && [ -n "$meta0" ] || stop "cannot hash git hooks/config" 1
 LOG=.task-state/logs/$id-$n.log
 set -m
 env -u GIT_CONFIG_COUNT "$DF_BIN" workflow run --allow-cross-directory -w "$REPO" \
-  --set "intent_file=$ifile" --set "repo_path=$REPO" --set "branch_slug=$slug" \
+  --set "intent_file=$ifile" --set "repo_path=$REPO" --set "branch_slug=$slug" --set "git_meta=$meta0" \
   --set "base_branch=$base" --set "task_id=$id" --set "attempt=$n" "$WORKFLOW" </dev/null >"$LOG" 2>&1 &
 DF_PID=$!
 set +m
@@ -138,14 +144,32 @@ wait "$DF_PID" 2>/dev/null; rc=$?
 DF_PID=""
 say "[$id #$n] workflow finished (engine exit $rc, log $LOG)"
 
+# Before any other git command: did the run plant hooks or change git config?
+meta_bad=no
+if [ "$(ig git-meta "$id" "$slug" "$base")" != "$meta0" ]; then
+  meta_bad=yes
+  case "$(ts get "$id" feedback.engine 2>/dev/null)" in
+    GIT_META_CHANGED*) ;;
+    *) ts set "$id" status=needs_human "feedback.engine=GIT_META_CHANGED: git hooks or git config changed during the run. They can make git run arbitrary code, so nothing more was executed (not parked). Inspect .git/hooks, core.hooksPath, .git/info/ and 'git config --list --show-origin', revert anything unexpected, then retry with status=pending attempts=0." >/dev/null ;;
+  esac
+fi
+
 # --- 6. Judge by the state file -----------------------------------------------------------------
 status=$(ts get "$id" status 2>/dev/null)
 outcome=""
 case "$status" in
   completed) outcome="COMPLETED commit $(ts get "$id" commit 2>/dev/null)" ;;
   needs_human)
-    eng=$(ts get "$id" feedback.engine 2>/dev/null)
-    case "$eng" in MERGE=BASE_MOVED*) outcome="NEEDS HUMAN (base branch moved)" ;; *) outcome="NEEDS HUMAN (merge conflict)" ;; esac ;;
+    eng=$(ts get "$id" feedback.engine 2>/dev/null); issue=""
+    for r in test_author implementer reviewer validator; do
+      [ "$(ts get "$id" "verdicts.$r" 2>/dev/null)" = INTENT_ISSUE ] && { issue=$r; break; }
+    done
+    case "$eng" in
+      GIT_META_CHANGED*) outcome="NEEDS HUMAN (git hooks/config changed)" ;;
+      MERGE=BASE_MOVED*) outcome="NEEDS HUMAN (base branch moved)" ;;
+      MERGE=CONFLICT*) outcome="NEEDS HUMAN (merge conflict)" ;;
+      *) if [ -n "$issue" ]; then outcome="NEEDS HUMAN (intent issue reported by $issue)"; else outcome="NEEDS HUMAN (see feedback)"; fi ;;
+    esac ;;
   *)
     if [ "$timed_out" = yes ]; then
       ts set "$id" status=escalated "feedback.engine=TIMEOUT: the run was stopped after ${TICK_TIMEOUT}s (stage: $(ts get "$id" phase 2>/dev/null))" >/dev/null
@@ -156,15 +180,15 @@ case "$status" in
     outcome="FAILED at $(ts get "$id" phase 2>/dev/null)" ;;
 esac
 
-# --- 7. Park an exhausted intent ----------------------------------------------------------------
+# --- 7. Park an exhausted intent or one with an intent issue (frees the tree for other intents) ----
+park=no
 case "$outcome" in
-  FAILED*)
-    if [ "$n" -ge "$MAX_ATTEMPTS" ]; then
-      trust=$(git rev-parse "$base") && s=$(git show "$trust:scripts/intent-git.sh") && [ -n "$s" ] \
-        && say "[$id] parking: $(INTENT_TRUST=$trust bash -c "$s" intent-git.sh park "$id" "$slug" "$base" 2>&1 | tail -1)" \
-        || say "[$id] parking failed: run intent-git.sh park manually"
-    fi ;;
+  FAILED*) [ "$n" -ge "$MAX_ATTEMPTS" ] && park=yes ;;
+  "NEEDS HUMAN (intent issue"*) park=yes ;;
 esac
+if [ "$park" = yes ] && [ "$meta_bad" = no ]; then
+  say "[$id] parking: $(INTENT_META=$meta0 ig park "$id" "$slug" "$base" 2>&1 | tail -1)"
+fi
 
 # --- 8. Report and decide -----------------------------------------------------------------------
 say "---"
@@ -175,9 +199,10 @@ case "$outcome" in
   COMPLETED*) ;;
   *)
     say "verdicts: $(ts get "$id" verdicts 2>/dev/null | tr -d ' \n')"
-    ts get "$id" feedback 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{for(const[k,v]of Object.entries(JSON.parse(d)))if(v)console.log(`feedback.${k}: ${String(v).split("\n")[0].slice(0,200)}`)}catch(e){}})' ;;
+    ts get "$id" feedback 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{for(const[k,v]of Object.entries(JSON.parse(d)))if(v)console.log(`feedback.${k}: ${String(v).trim().replace(/\s*\n\s*/g," | ").slice(0,400)}`)}catch(e){}})' ;;
 esac
 say "---"
+[ "$meta_bad" = yes ] && stop "git hooks/config changed during the run: needs human (see feedback.engine)"
 case "$(ts next "$MAX_ATTEMPTS" | jget action)" in
   run) say "LOOP: CONTINUE" ;;
   done) stop "all intents completed" ;;

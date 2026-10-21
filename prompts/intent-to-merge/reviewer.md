@@ -13,6 +13,14 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
    ```
  Never use `2>/dev/null` or `|| true` on this command.
 
+## Intent issue (rare: it stops this intent until a human edits it)
+Record INTENT_ISSUE instead of a P0/P1 only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
+```
+scripts/task-state.js verdict ${task_id} reviewer INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+<quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
+FEEDBACK
+```
+
 ## Review checklist
 - Type errors / obvious logic bugs
 - Acceptance tests (`*.acceptance.test.*`, written from the Success Metrics by a separate test author before implementation): does every Success Metric have a test with meaningful, specific assertions? A metric with no test, or a test that asserts something contrary to the intent = P1.
@@ -31,4 +39,4 @@ P0 = must-fix blocker (broken, security hole). P1 = significant defect. Anything
 The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.reviewer` from the state file. The feedback (heredoc body above) must contain: every P0/P1 finding as: severity, file:line, problem, suggested fix — one per line. On CLEAR the helper clears it automatically.
 
 ## Final output (CRITICAL)
-The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: CLEAR (no P0/P1 findings), P1 (worst finding is P1) or P0 (any P0).
+The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: CLEAR (no P0/P1 findings), P1 (worst finding is P1), P0 (any P0) or INTENT_ISSUE.

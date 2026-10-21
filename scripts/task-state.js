@@ -7,7 +7,8 @@
 //   task-state.js get <task_id> [key]
 //   task-state.js verdict <task_id> <test_author|implementer|tester|reviewer|validator> <TOKEN> <attempt> [-]
 //       (agents: atomically record verdict, attempt, phase, status and feedback; with "-" the
-//        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token)
+//        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token;
+//        INTENT_ISSUE sets status=needs_human)
 //   task-state.js list
 //   task-state.js next [max_attempts]   (orchestrator: next eligible intent as JSON, or {action:"done"|"blocked"};
 //                                        status=needs_human intents and their dependents are never picked)
@@ -67,12 +68,15 @@ function getPath(obj, dotted) {
 }
 
 const ROLES = {
-  test_author: { phase: 'tests_written', ok: 'DONE', tokens: ['DONE', 'BLOCKED'] },
-  implementer: { phase: 'implemented', ok: 'DONE', tokens: ['DONE', 'TEST_DISPUTE'] },
+  test_author: { phase: 'tests_written', ok: 'DONE', tokens: ['DONE', 'BLOCKED', 'INTENT_ISSUE'] },
+  implementer: { phase: 'implemented', ok: 'DONE', tokens: ['DONE', 'TEST_DISPUTE', 'INTENT_ISSUE'] },
   tester: { phase: 'tested', ok: 'GREEN', tokens: ['GREEN', 'BUILD_FAIL', 'TEST_FAIL'] },
-  reviewer: { phase: 'reviewed', ok: 'CLEAR', tokens: ['CLEAR', 'P0', 'P1'] },
-  validator: { phase: 'validated', ok: 'PASS', tokens: ['PASS', 'FAIL'] },
+  reviewer: { phase: 'reviewed', ok: 'CLEAR', tokens: ['CLEAR', 'P0', 'P1', 'INTENT_ISSUE'] },
+  validator: { phase: 'validated', ok: 'PASS', tokens: ['PASS', 'FAIL', 'INTENT_ISSUE'] },
 };
+// The intent itself is wrong (contradictory, impossible or unverifiable): retrying cannot fix it, so the
+// intent goes to a human (status needs_human; `next` skips it and its dependents).
+const INTENT_ISSUE = 'INTENT_ISSUE';
 
 function main() {
   const [cmd, id, ...rest] = process.argv.slice(2);
@@ -113,7 +117,7 @@ function main() {
     setPath(entry, `verdicts.${role}_attempt`, attempt);
     setPath(entry, `feedback.${role}`, ok ? '' : fb);
     entry.phase = r.phase;
-    entry.status = ok ? 'in_progress' : 'escalated';
+    entry.status = token === INTENT_ISSUE ? 'needs_human' : ok ? 'in_progress' : 'escalated';
     entry.updated_at = new Date().toISOString();
     state.intents[id] = entry;
     writeState(state);
@@ -239,7 +243,13 @@ function main() {
       const e = intents[key];
       if (!e) { waiting.push({ id: key, reason: 'listed in critical_path but has no intents entry' }); continue; }
       if (done(key)) continue;
-      if (e.status === 'needs_human') { waiting.push({ id: key, reason: `needs human: ${(e.feedback || {}).engine || 'see state'}` }); continue; }
+      if (e.status === 'needs_human') {
+        const fb = e.feedback || {};
+        const role = Object.keys(ROLES).find((r) => (e.verdicts || {})[r] === INTENT_ISSUE);
+        const why = role ? `intent issue (${role}): ${String(fb[role] || '').split('\n')[0].slice(0, 200)}` : fb.engine || 'see state';
+        waiting.push({ id: key, reason: `needs human: ${why}` });
+        continue;
+      }
       const unmet = (e.depends_on || []).filter((d) => !done(d));
       if (unmet.length) { waiting.push({ id: key, reason: `waiting on: ${unmet.join(', ')}` }); continue; }
       if (attemptsOf(e) >= max) { waiting.push({ id: key, reason: `exhausted ${attemptsOf(e)}/${max} attempts` }); continue; }

@@ -16,6 +16,14 @@ End (CRITICAL — the next step reads your verdict from the state file). Record 
    ```
  Never use `2>/dev/null` or `|| true` on this command. Do not clear or edit other feedback keys.
 
+## Intent issue (rare: it stops this intent until a human edits it)
+Record INTENT_ISSUE instead of DONE only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
+```
+scripts/task-state.js verdict ${task_id} test_author INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+<quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
+FEEDBACK
+```
+
 ## Rules (CRITICAL — enforced by a fingerprint check after you finish)
 - Create or edit ONLY files named `*.acceptance.test.<ext>` (e.g. `lib/progress.acceptance.test.ts`). Any other change (source code, package.json, configs, fixtures, snapshots, other test files) makes the workflow reject all your tests. Put helpers and fixtures inside the acceptance test file itself; you may import existing project code and existing test helpers.
 - Git is read-only for you: never run `git commit`, `add`, `checkout`, `switch`, `stash`, `reset`, `restore`, `clean`, `merge`, `rebase` or `push`.
@@ -43,4 +51,4 @@ If attempt is greater than 1, acceptance tests from the previous attempt already
 Do not clear the feedback; the implementer does that.
 
 ## Final output
-Exactly one token: DONE or BLOCKED.
+Exactly one token: DONE, BLOCKED or INTENT_ISSUE.
