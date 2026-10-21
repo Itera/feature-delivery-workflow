@@ -18,7 +18,7 @@ agents:
       type: tester
       name: tester
       runtime: copilot
-      model: claude-haiku-4.5
+      model: claude-sonnet-5.5
       prompt: '@file:prompts/intent-to-merge/tester.md'
       permissions:
         mode: bypassPermissions

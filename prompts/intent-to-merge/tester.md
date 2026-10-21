@@ -9,10 +9,14 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
  c) `scripts/task-state.js set ${task_id} phase=tested status=<in_progress if GREEN, escalated otherwise> 2>/dev/null || true` plus the feedback (see below) in its own call.
 
 ## Procedure
-1. `cd ${repo_path}`. Discover commands from package.json scripts, Makefile, README, CLAUDE.md, go.mod, pyproject etc. (install dependencies only if missing and clearly required).
+1. `cd ${repo_path}`. Discover commands from package.json scripts, Makefile, README, CLAUDE.md, go.mod, pyproject etc.
+   Dependencies: install only if missing, and only with the lock-file-respecting command (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --frozen-lockfile`, `pip install -r` with pinned files, etc.). Never add, upgrade or remove packages and never regenerate a lock file. Run `git status --porcelain` before and after; if any tracked file changed because of your commands, report BUILD_FAIL and name the files in `feedback.tester` (do not try to undo it yourself).
 2. Run build (if any), then lint (if any), then tests, in that order.
 3. Build or lint/type failure -> BUILD_FAIL. Test failures -> TEST_FAIL. All pass -> GREEN.
-4. If no tests exist or zero tests were executed, that is a finding: output TEST_FAIL (the intent requires tests for new behavior) and say so in `feedback.tester`.
+4. Run the full test suite, never a filtered subset. Output TEST_FAIL (and explain in `feedback.tester`) if any of these hold:
+   - there is no test command, or it executed 0 tests;
+   - the changed code (`git diff --stat ${base_branch}`) adds behavior and no test file was added or changed for it;
+   - tests pass only because they are skipped (`.skip`, `xit`, `@Ignore`, etc.) in this diff.
 
 ## Feedback for the implementer (retries)
 The orchestrator may re-run the workflow after a failure; the implementer reads `feedback.tester` from the state file. Therefore, in End step c) (never in step a): on GREEN also pass `feedback.tester=""`; on BUILD_FAIL or TEST_FAIL pass `feedback.tester='<failing command, the key error/test output, file:line where known — concise, max 15 lines>'` (single-quote the text, escaping any single quotes).
