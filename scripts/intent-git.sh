@@ -62,7 +62,7 @@ SETUP_CFG=(':(glob)**/vitest.config.*' ':(glob)**/vitest.workspace.*' ':(glob)**
   ':(glob)**/playwright.config.*' ':(glob)**/karma.conf.*' ':(glob)**/ava.config.*' ':(glob)**/.nycrc*' ':(glob)**/.c8rc*'
   ':(glob)**/pytest.ini' ':(glob)**/conftest.py')
 # The loop's own files: an intent must never change them (they decide whether its work is accepted).
-PROTECTED=(scripts/intent-git.sh scripts/orchestrate-tick.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
+PROTECTED=(scripts/intent-git.sh scripts/orchestrate-tick.sh scripts/tick-loop.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
 TRUST=${INTENT_TRUST:-}
 STATE_HASH=${INTENT_STATE_HASH:-}
 META=${INTENT_META:-}
