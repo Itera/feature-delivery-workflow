@@ -6,7 +6,8 @@
 #   LOOP: CONTINUE | LOOP: STOP (<reason>)
 # Exit code: 0 when the tick ran normally (whatever the outcome), 1 on a preflight/setup error.
 # Env overrides: MAX_ATTEMPTS (3), TICK_TIMEOUT seconds (6000, backstop for a hung run),
-#   WORKFLOW, TOOLING (task-state.js), DF_BIN (digital-factory binary), POLL (10 s).
+#   WORKFLOW, TOOLING (task-state.js), DF_BIN (digital-factory binary), POLL (10 s),
+#   BROWSER_CHECK (1; 0 skips the Chromium preflight), PW_DIR (~/.cache/intent-orchestrator/pw).
 set -uo pipefail
 for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do unset "${v%=}"; done
 
@@ -103,6 +104,33 @@ cur=$(git rev-parse --abbrev-ref HEAD)
 dirty=$(git status --porcelain -- . ':(exclude).task-state' ":(exclude)$TS" ':(exclude).digital-factory' ':(exclude).digital-factory-outputs' ':(exclude).copilot-cache')
 if [ -n "$dirty" ] && [ "$cur" != "feature/$slug" ]; then
   stop "dirty working tree on another branch: $cur"
+fi
+
+# --- 3b. Browser check: the validator drives UI metrics with headless Playwright Chromium --------
+# Kept in a shared tool dir outside the repo (so it never touches the project's lock files). Installs
+# Playwright and Chromium on first use and, with passwordless sudo, the OS libraries Chromium needs.
+# Stops before an attempt is used up when the browser still cannot start. BROWSER_CHECK=0 skips it.
+browser_launch() {
+  (cd "$PW_DIR" && node -e 'require("playwright").chromium.launch().then(b=>b.close()).then(()=>process.exit(0),e=>{const l=String(e.message).split("\n").map(s=>s.trim()).filter(Boolean);const k=l.filter(s=>/shared librar|missing|doesn.t exist|not found|error/i.test(s)&&!/^<launching>/.test(s));console.error((k.length?k:l).slice(0,2).join(" | ").slice(0,400));process.exit(1)})') 2>&1
+}
+if [ "${BROWSER_CHECK:-1}" != 0 ]; then
+  PW_DIR=${PW_DIR:-$HOME/.cache/intent-orchestrator/pw}
+  if [ ! -d "$PW_DIR/node_modules/playwright" ]; then
+    say "preflight: installing Playwright in $PW_DIR"
+    (mkdir -p "$PW_DIR" && cd "$PW_DIR" && { [ -f package.json ] || npm init -y >/dev/null; } \
+      && npm install --silent --no-audit --no-fund playwright >/dev/null) 2>&1 | tail -5
+    [ -d "$PW_DIR/node_modules/playwright" ] || stop "browser check: cannot install Playwright in $PW_DIR (BROWSER_CHECK=0 skips this check)" 1
+  fi
+  if ! err=$(browser_launch); then
+    say "preflight: Chromium does not start ($err); installing it"
+    (cd "$PW_DIR" && npx --no-install playwright install chromium) 2>&1 | tail -3
+    if ! browser_launch >/dev/null && sudo -n true 2>/dev/null; then
+      say "preflight: installing Chromium system libraries (sudo)"
+      (cd "$PW_DIR" && sudo -n env "PATH=$PATH" npx --no-install playwright install-deps chromium) 2>&1 | tail -3
+    fi
+    err=$(browser_launch) || stop "browser check: Chromium cannot start: $err. Fix once per machine: (cd $PW_DIR && sudo npx playwright install-deps chromium), or set BROWSER_CHECK=0 for projects without a UI" 1
+    say "preflight: Chromium ready ($PW_DIR)"
+  fi
 fi
 
 # --- 4. Record the attempt ----------------------------------------------------------------------
