@@ -2,6 +2,23 @@ name: intent-to-merge
 version: "1.0"
 description: 'Pass task_id explicitly (e.g. the intent file basename); it defaults to "intent". Generic intent-driven dev loop: branch -> implement -> test -> review -> validate -> conditional merge, from a single intent markdown file.'
 metadata:
+    stages:
+        - name: Setup
+          tasks: [branch, snapshot-before-tests]
+        - name: Acceptance tests
+          tasks: [write-tests, lock-tests]
+        - name: Implement
+          tasks: [implement]
+        - name: Test gate
+          tasks: [run-tests, summarise-test-failure, gate-test]
+        - name: Review
+          tasks: [snapshot-before-review, review, gate-review]
+        - name: Validate
+          tasks: [snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
+        - name: Merge
+          tasks: [merge]
+        - name: Report
+          tasks: [report]
     team_id: team-1791906795-ce1d1a69
     generated_at: "2026-10-13T17:53:55+02:00"
     schema_version: "1.0"
