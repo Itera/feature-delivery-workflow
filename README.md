@@ -46,3 +46,8 @@ not on the PATH, in `~/.digital-factory` or in a `.digital-factory` folder above
 
 Everything in `.intent-loop/` and `.claude/skills/intent-orchestrator/` is protected: a run that changes it is
 rejected. Change the loop here and update projects again.
+
+The intent files are guarded too, also when they are kept out of git (e.g. listed in `.git/info/exclude`): before
+each run the tick hashes the intents folder and copies it to `.task-state/plan-before/`. If an intent file changed
+during the run, merge refuses and the tick marks the intent `needs_human` (`PLAN_CHANGED`) and stops the loop;
+`diff -r .task-state/plan-before <intents folder>` shows what changed.

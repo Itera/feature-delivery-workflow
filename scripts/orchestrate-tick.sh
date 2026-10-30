@@ -154,10 +154,19 @@ trust=$(git rev-parse "$base") && IG=$(git show "$trust:.intent-loop/scripts/int
   || stop ".intent-loop/scripts/intent-git.sh is not committed on $base" 1
 ig() { INTENT_TRUST=$trust bash -c "$IG" intent-git.sh "$@"; }
 meta0=$(ig git-meta "$id" "$slug" "$base") && [ -n "$meta0" ] || stop "cannot hash git hooks/config" 1
+# Intent files guard: their hash before the run (merge and the check after the run compare it) and a copy, so a
+# human can see what changed (diff -r .task-state/plan-before <intents folder>).
+plan_dir=$(node -e 'try{process.stdout.write(require(process.argv[1]).intents_dir||"")}catch(e){}' "$REPO/.task-state/state.json")
+plan0=""
+if [ -n "$plan_dir" ] && [ -d "$plan_dir" ]; then
+  plan0=$(ig plan-hash "$id" "$slug" "$base" "$plan_dir") && [ -n "$plan0" ] || stop "cannot hash the intent files in $plan_dir" 1
+  rm -rf .task-state/plan-before && cp -R "$plan_dir" .task-state/plan-before
+fi
 LOG=.task-state/logs/$id-$n.log
 set -m
 env -u GIT_CONFIG_COUNT "$DF_BIN" workflow run --allow-cross-directory -w "$REPO" \
   --set "intent_file=$ifile" --set "repo_path=$REPO" --set "branch_slug=$slug" --set "git_meta=$meta0" \
+  --set "intents_dir=$plan_dir" --set "plan_hash=$plan0" \
   --set "base_branch=$base" --set "task_id=$id" --set "attempt=$n" "$WORKFLOW" </dev/null >"$LOG" 2>&1 &
 DF_PID=$!
 set +m
@@ -191,6 +200,16 @@ if [ "$(ig git-meta "$id" "$slug" "$base")" != "$meta0" ]; then
     *) ts set "$id" status=needs_human "feedback.engine=GIT_META_CHANGED: git hooks or git config changed during the run. They can make git run arbitrary code, so nothing more was executed (not parked). Inspect .git/hooks, core.hooksPath, .git/info/ and 'git config --list --show-origin', revert anything unexpected, then retry with status=pending attempts=0." >/dev/null ;;
   esac
 fi
+# Did the run change the intent files? (merge already refuses that; this also catches a change after the merge.)
+plan_bad=no
+if [ -n "$plan0" ] && [ "$(ig plan-hash "$id" "$slug" "$base" "$plan_dir")" != "$plan0" ]; then
+  plan_bad=yes
+  case "$(ts get "$id" feedback.engine 2>/dev/null)" in
+    PLAN_CHANGED*) ;;
+    *) merged=$(ts get "$id" commit 2>/dev/null)
+       ts set "$id" status=needs_human "feedback.engine=PLAN_CHANGED: the intent files in $plan_dir changed during the run${merged:+, after the merge (commit $merged)}. Compare them with the copy taken before the run (diff -r .task-state/plan-before $plan_dir) and restore what should not have changed; then ${merged:+set status=completed if the merged work is fine, or }retry with status=pending attempts=0." >/dev/null ;;
+  esac
+fi
 
 # --- 6. Judge by the state file -----------------------------------------------------------------
 status=$(ts get "$id" status 2>/dev/null)
@@ -204,6 +223,7 @@ case "$status" in
     done
     case "$eng" in
       GIT_META_CHANGED*) outcome="NEEDS HUMAN (git hooks/config changed)" ;;
+      PLAN_CHANGED*|MERGE=PLAN_CHANGED*) outcome="NEEDS HUMAN (intent files changed)" ;;
       MERGE=BASE_MOVED*) outcome="NEEDS HUMAN (base branch moved)" ;;
       MERGE=CONFLICT*) outcome="NEEDS HUMAN (merge conflict)" ;;
       *) if [ -n "$issue" ]; then outcome="NEEDS HUMAN (intent issue reported by $issue)"; else outcome="NEEDS HUMAN (see feedback)"; fi ;;
@@ -241,6 +261,7 @@ case "$outcome" in
 esac
 say "---"
 [ "$meta_bad" = yes ] && stop "git hooks/config changed during the run: needs human (see feedback.engine)"
+[ "$plan_bad" = yes ] && stop "intent files changed during the run: needs human (see feedback.engine)"
 case "$(ts next "$MAX_ATTEMPTS" | jget action)" in
   run) say "LOOP: CONTINUE" ;;
   done) stop "all intents completed" ;;

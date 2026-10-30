@@ -33,6 +33,10 @@ variables:
     # Hash of git hooks/config taken by the orchestrator before the run (intent-git.sh git-meta); empty =
     # snapshot-before-tests takes it. Every later step stops the run if hooks or config changed since.
     git_meta: ""
+    # Intent files guard: the intents folder and the hash of its files, taken by the orchestrator before the run
+    # (intent-git.sh plan-hash); merge refuses if they changed. Empty = no check.
+    intents_dir: ""
+    plan_hash: ""
     # Fixed test gate, run from the repo root with sh -c; its exit code is the test verdict. Passed
     # verbatim through a quoted heredoc, so any quoting is fine (single line only). Set it per project
     # (e.g. `npm test`, `cd app && npm run build && npm test`, `pytest`); the default assumes npm.
@@ -243,6 +247,7 @@ tasks:
         command: |
           [ -n "${repo_path}" ] && cd "${repo_path}" && mkdir -p .task-state || exit 1
           set -- ${tasks.snapshot-before-validate.output?}
+          export INTENT_PLAN_DIR="${intents_dir}" INTENT_PLAN_HASH="${plan_hash}"
           export INTENT_TRUST="$3" INTENT_STATE_HASH="$4" INTENT_META="$5"
           [ -n "$INTENT_TRUST" ] && s=$(git show "$INTENT_TRUST:.intent-loop/scripts/intent-git.sh") && [ -n "$s" ] || { echo "no trusted intent-git.sh (snapshot: $*)" >&2; exit 1; }
           bash -c "$s" intent-git.sh merge "${task_id}" "${branch_slug}" "${base_branch}"

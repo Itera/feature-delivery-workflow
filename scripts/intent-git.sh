@@ -6,8 +6,10 @@
 #   intent-git.sh park   <task_id> <branch_slug> <base_branch>   WIP-commit an exhausted intent (sensitive files -> stash)
 #   intent-git.sh cleanup <task_id> <branch_slug> <base_branch>  stop processes in .task-state/pids-<task_id>
 #   intent-git.sh merge  <task_id> <branch_slug> <base_branch>   commit, merge --no-ff into base, delete branch
+#       (refuses, with status=needs_human, if the intent files changed since INTENT_PLAN_HASH, see plan_hash)
 #   intent-git.sh snapshot <task_id> <branch_slug> <base_branch> [role]   prints "<tree> <head> <trust> <state_hash> <git_meta>"
 #   intent-git.sh git-meta <task_id> <branch_slug> <base_branch>   prints the git metadata hash (see git_meta_hash)
+#   intent-git.sh plan-hash <task_id> <branch_slug> <base_branch> <intents_dir>   prints the intent files' hash
 #   intent-git.sh verify   <task_id> <branch_slug> <base_branch> <tree> <head> [validator|reviewer|test_author]
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
@@ -81,6 +83,17 @@ ts() {
 st() { ts set "$task_id" "$@" >/dev/null 2>&1 || true; }
 fail() { st "phase=$1" status=failed "feedback.engine=$2: $3"; echo "$2 $3"; exit 1; }
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
+
+# Hash of the intent files (every file under the intents folder: names and content). Intents may be kept out of
+# git (ignored), so neither the branch diff nor the tamper guard shows an agent editing them; the orchestrator
+# takes this hash before the run and merge (and the orchestrator after the run) refuse if it changed. Runs no git.
+plan_hash() {
+  local d=${1:-} f sum
+  if command -v sha256sum >/dev/null 2>&1; then sum='sha256sum'; elif command -v shasum >/dev/null 2>&1; then sum='shasum -a 256'; else sum='cksum'; fi
+  [ -n "$d" ] && [ -d "$d" ] || { echo none; return 0; }
+  (cd "$d" && find . -type f -print | LC_ALL=C sort | while IFS= read -r f; do printf '== %s\n' "$f"; cat -- "$f"; done) \
+    | $sum | cut -d' ' -f1
+}
 
 # Hash of what lives outside the working tree but makes git run code or changes what git sees: config of
 # every scope (hooksPath, fsmonitor, filter/diff drivers, aliases, ...; branch.* is left out, `push -u` and
@@ -230,6 +243,7 @@ do_verify() {
 
 case "$cmd" in
 git-meta) git_meta_hash; exit ;;
+plan-hash) plan_hash "${5:-}"; exit ;;
 snapshot|branch|park) ;;
 *) [ -n "$TRUST" ] && [ -z "$META" ] && { echo "GIT_META=MISSING: no INTENT_META baseline for $cmd" >&2; exit 1; } ;;
 esac
@@ -283,6 +297,11 @@ merge)
   fi
   pc=$(protected_changes)
   [ -z "$pc" ] || fail merging MERGE=ABORTED_PROTECTED_FILES "$pc - implementer: revert these files to $base (git checkout $base -- <file>, delete new ones); intents must not change the dev loop itself"
+  # The intent files must be the ones the run started with: code built against an edited intent is not merged.
+  if [ -n "${INTENT_PLAN_HASH:-}" ] && [ "$(plan_hash "${INTENT_PLAN_DIR:-}")" != "$INTENT_PLAN_HASH" ]; then
+    st phase=merging status=needs_human "feedback.engine=PLAN_CHANGED: the intent files in ${INTENT_PLAN_DIR:-?} changed during the run, so nothing was merged (the work is on $feature). Compare them with the copy taken before the run (diff -r .task-state/plan-before ${INTENT_PLAN_DIR:-?}), restore what should not have changed, then retry with status=pending attempts=0."
+    echo "MERGE=PLAN_CHANGED"; exit 1
+  fi
   # Add everything, then unstage the orchestrator's own files. (Exclude pathspecs in `git add` exit 1
   # when the excluded path is also gitignored.)
   git add -A -- . || fail merging MERGE=FAILED git-add
