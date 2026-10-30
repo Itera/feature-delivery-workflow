@@ -12,10 +12,10 @@
 #       Tamper guard for agents whose tool denies are not enforced (bypassPermissions under copilot):
 #       snapshot fingerprints the working tree before the agent runs; verify exits 1 (and records
 #       status=escalated + verdicts.<role>=MODIFIED_FILES|GUARD_ERROR) if HEAD moved or any
-#       non-ignored file changed since. Paths listed in scripts/intent-guard-ignore at <head> (one
+#       non-ignored file changed since. Paths listed in .intent-loop/intent-guard-ignore at <head> (one
 #       pathspec per line, # comments) are left out of the fingerprint. Nothing is stored in the repo:
 #       the workflow carries "<tree> <head>" in the snapshot task's output and runs both steps from
-#       the committed copy of this script (git show <head>:scripts/intent-git.sh), so an agent cannot
+#       the committed copy of this script (git show <head>:.intent-loop/intent-git.sh), so an agent cannot
 #       forge the snapshot or patch the checker.
 #   For role test_author the acceptance tests ($ACCEPT) are left out of the fingerprint: the test author
 #   may write exactly those files and nothing else.
@@ -52,8 +52,8 @@ if [ -z "$cmd" ] || [ -z "$task_id" ] || [ -z "$slug" ] || [ -z "$base" ]; then
   exit 2
 fi
 feature="feature/$slug"
-state=scripts/task-state.js
-excl=(':(exclude).task-state' ':(exclude)scripts/task-state.js' ':(exclude).copilot-cache' ':(exclude).digital-factory' ':(exclude).digital-factory-outputs')
+state=.intent-loop/task-state.js
+excl=(':(exclude).task-state' ':(exclude).intent-loop/task-state.js' ':(exclude).copilot-cache' ':(exclude).digital-factory' ':(exclude).digital-factory-outputs')
 # Acceptance tests written by the test author from the intent's Success Metrics (locked for the implementer).
 ACCEPT=':(glob)**/*.acceptance.test.*'
 # Test setup locked together with the acceptance tests: (pre|post)test* scripts of every package.json and
@@ -62,7 +62,7 @@ SETUP_CFG=(':(glob)**/vitest.config.*' ':(glob)**/vitest.workspace.*' ':(glob)**
   ':(glob)**/playwright.config.*' ':(glob)**/karma.conf.*' ':(glob)**/ava.config.*' ':(glob)**/.nycrc*' ':(glob)**/.c8rc*'
   ':(glob)**/pytest.ini' ':(glob)**/conftest.py')
 # The loop's own files: an intent must never change them (they decide whether its work is accepted).
-PROTECTED=(scripts/intent-git.sh scripts/orchestrate-tick.sh scripts/tick-loop.sh scripts/intent-guard-ignore intent-to-merge.yaml prompts/intent-to-merge .claude/skills/intent-orchestrator)
+PROTECTED=(.intent-loop .claude/skills/intent-orchestrator)
 TRUST=${INTENT_TRUST:-}
 STATE_HASH=${INTENT_STATE_HASH:-}
 META=${INTENT_META:-}
@@ -112,11 +112,11 @@ tree_fingerprint() {
   while IFS= read -r l || [ -n "$l" ]; do
     l=${l%%#*}; l=$(printf %s "$l" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -n "$l" ] && ign+=("$l")
-  done < <(git show "${TRUST:-$rev}:scripts/intent-guard-ignore" 2>/dev/null)
+  done < <(git show "${TRUST:-$rev}:.intent-loop/intent-guard-ignore" 2>/dev/null)
   rm -f "$idx"
   GIT_INDEX_FILE=$idx git read-tree HEAD && GIT_INDEX_FILE=$idx git add -A -- . || rc=1
   if [ $rc -eq 0 ]; then
-    for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs ${ign[@]+"${ign[@]}"}; do
+    for p in .task-state .intent-loop/task-state.js .copilot-cache .digital-factory .digital-factory-outputs ${ign[@]+"${ign[@]}"}; do
       GIT_INDEX_FILE=$idx git rm -r -q --cached --ignore-unmatch -- "$p" >/dev/null || { rc=1; break; }
     done
   fi
@@ -188,7 +188,7 @@ protected_changes() {
 # the excluded path is also gitignored).
 unstage_internal() {
   local p
-  for p in .task-state scripts/task-state.js .copilot-cache .digital-factory .digital-factory-outputs; do git reset -q -- "$p" 2>/dev/null || true; done
+  for p in .task-state .intent-loop/task-state.js .copilot-cache .digital-factory .digital-factory-outputs; do git reset -q -- "$p" 2>/dev/null || true; done
 }
 # Staged files that must never be committed (secrets, keys, logs, databases, dependencies, build output).
 sensitive_staged() {

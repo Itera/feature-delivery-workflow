@@ -8,7 +8,7 @@ argument-hint: "[intents-folder]"
 
 The whole tick is done by a deterministic script; your job is only to run it, relay its progress and act on its last line. You never implement, test, review, merge, commit, edit the state file or pick an intent yourself.
 
-- TICK = `scripts/orchestrate-tick.sh` in REPO (the project's own copy of the loop).
+- TICK = `.intent-loop/orchestrate-tick.sh` in REPO (the project's own copy of the loop).
 - REPO = the current working directory.
 
 ## Procedure
@@ -21,11 +21,11 @@ The whole tick is done by a deterministic script; your job is only to run it, re
    If the output has no `LOOP:` line (the script crashed), show its last 20 lines and stop with `LOOP: STOP (orchestrator script failed)`.
 
 ## What the script does (for answering questions; do not do it by hand)
-Preflight (git repo, empty initial commit if needed, checks/installs `scripts/task-state.js`, creates or syncs `.task-state/state.json`), a lock so only one tick runs, `task-state.js next` selection, a dirty-tree check, a browser check (headless Playwright Chromium for the validator's UI probes; see below), then the `intent-to-merge` workflow with the log in `.task-state/logs/<id>-<attempt>.log` and a timeout (`TICK_TIMEOUT`, default 6000 s) that stops the whole run. It judges the outcome by the state file, not the engine status. It hashes git hooks and git config before the run; the workflow re-checks the hash before each of its git steps and the script after the run. After the last attempt (`MAX_ATTEMPTS`, default 3), or when an agent reported an intent issue, it parks the intent: `intent-git.sh park` commits the work as WIP on `feature/<slug>` (sensitive files go to a git stash instead) and checks out the base branch.
+Preflight (git repo, empty initial commit if needed, checks/installs `.intent-loop/task-state.js`, creates or syncs `.task-state/state.json`), a lock so only one tick runs, `task-state.js next` selection, a dirty-tree check, a browser check (headless Playwright Chromium for the validator's UI probes; see below), then the `intent-to-merge` workflow with the log in `.task-state/logs/<id>-<attempt>.log` and a timeout (`TICK_TIMEOUT`, default 6000 s) that stops the whole run. It judges the outcome by the state file, not the engine status. It hashes git hooks and git config before the run; the workflow re-checks the hash before each of its git steps and the script after the run. After the last attempt (`MAX_ATTEMPTS`, default 3), or when an agent reported an intent issue, it parks the intent: `intent-git.sh park` commits the work as WIP on `feature/<slug>` (sensitive files go to a git stash instead) and checks out the base branch.
 
 ## Human follow-up (tell the user when it applies)
 - `LOOP: STOP (browser check: Chromium cannot start ...)`: this machine cannot run headless Chromium, which the validator needs for UI metrics. The tick installs Playwright and Chromium in `~/.cache/intent-orchestrator/pw` by itself, and the OS libraries too when passwordless sudo works. Otherwise run once per machine: `cd ~/.cache/intent-orchestrator/pw && sudo npx playwright install-deps chromium`. For projects without a UI, set `BROWSER_CHECK=0`. No attempt was used up.
-- `NEEDS HUMAN (merge conflict)`: merge `feature/<slug>` manually, then `scripts/task-state.js set <id> status=completed commit=<sha>`; or fix the branch and `set <id> status=pending attempts=0` to retry.
+- `NEEDS HUMAN (merge conflict)`: merge `feature/<slug>` manually, then `.intent-loop/task-state.js set <id> status=completed commit=<sha>`; or fix the branch and `set <id> status=pending attempts=0` to retry.
 - `NEEDS HUMAN (base branch moved)`: something other than the merge step committed to the base branch during the run. Check it, then `set <id> status=pending attempts=0`.
 - `NEEDS HUMAN (intent issue reported by <role>)`: the intent itself is contradictory, impossible or unverifiable (`feedback.<role>` quotes the problem and proposes an edit). Fix the intent file, then `set <id> status=pending attempts=0 feedback={}`. Other intents that do not depend on it keep running.
 - `NEEDS HUMAN (git hooks/config changed)` (the loop stops): something in the run changed `.git/hooks`, `core.hooksPath`, `.git/info/` or git config, which can make git run arbitrary code. Inspect them (`git config --list --show-origin`), revert anything unexpected, then `set <id> status=pending attempts=0`. The work was not parked.

@@ -2,12 +2,12 @@
 Final acceptance check: verify each item in the "Success Metrics" section of `${intent_file}` is demonstrably met by the RUNNING application/CLI built from `${repo_path}`. This is not a full requirements audit and not a code review: only the listed metrics, proven with runtime evidence. Do not modify source code.
 
 ## Status Protocol
-Start: `scripts/task-state.js set ${task_id} phase=validating status=in_progress 2>/dev/null || true`
+Start: `.intent-loop/task-state.js set ${task_id} phase=validating status=in_progress 2>/dev/null || true`
 End (CRITICAL — the gate reads the verdict from the state file, not from your output). Record it with ONE command (it sets verdict, attempt, phase, status and feedback atomically, checks the token and prints it back; it exits non-zero on a mistake, then fix and re-run it):
- - PASS: `scripts/task-state.js verdict ${task_id} validator PASS ${attempt}`
+ - PASS: `.intent-loop/task-state.js verdict ${task_id} validator PASS ${attempt}`
  - FAIL: pass `-` and the feedback as a quoted heredoc (no escaping needed):
    ```
-   scripts/task-state.js verdict ${task_id} validator <FAIL> ${attempt} - <<'FEEDBACK'
+   .intent-loop/task-state.js verdict ${task_id} validator <FAIL> ${attempt} - <<'FEEDBACK'
    <feedback for the implementer, see below>
    FEEDBACK
    ```
@@ -16,7 +16,7 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
 ## Intent issue (rare: it stops this intent until a human edits it)
 Record INTENT_ISSUE instead of FAIL only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
 ```
-scripts/task-state.js verdict ${task_id} validator INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+.intent-loop/task-state.js verdict ${task_id} validator INTENT_ISSUE ${attempt} - <<'FEEDBACK'
 <quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
 FEEDBACK
 ```

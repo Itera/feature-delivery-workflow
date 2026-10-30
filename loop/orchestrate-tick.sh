@@ -11,9 +11,9 @@
 set -uo pipefail
 for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do unset "${v%=}"; done
 
-LOOP_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+LOOP_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 WORKFLOW=${WORKFLOW:-$LOOP_HOME/intent-to-merge.yaml}
-TOOLING=${TOOLING:-$LOOP_HOME/scripts/task-state.js}
+TOOLING=${TOOLING:-$LOOP_HOME/task-state.js}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 TICK_TIMEOUT=${TICK_TIMEOUT:-6000}
 POLL=${POLL:-10}
@@ -30,7 +30,7 @@ if [ -z "${DF_BIN:-}" ]; then
 fi
 REPO=$(pwd -P)
 ARG=${1:-}
-TS=scripts/task-state.js
+TS=.intent-loop/task-state.js
 
 say() { printf '%s\n' "$*"; }
 stop() { say "LOOP: STOP ($1)"; exit "${2:-0}"; }
@@ -71,7 +71,7 @@ trap 'say "interrupted"; exit 130' INT TERM
 
 # task-state.js: install if missing; agents could tamper with it between runs, so check it.
 if [ ! -f "$TS" ]; then
-  mkdir -p scripts && cp "$TOOLING" "$TS" && chmod +x "$TS" && say "preflight: installed $TS (not committed)"
+  mkdir -p .intent-loop && cp "$TOOLING" "$TS" && chmod +x "$TS" && say "preflight: installed $TS (not committed)"
 elif git ls-files --error-unmatch "$TS" >/dev/null 2>&1; then
   git diff --quiet HEAD -- "$TS" || stop "$TS has uncommitted changes; review and commit or revert them"
 elif [ "$(cd "$(dirname "$TOOLING")" && pwd -P)/$(basename "$TOOLING")" != "$REPO/$TS" ] && ! cmp -s "$TOOLING" "$TS"; then
@@ -148,8 +148,8 @@ say "[$id #$n/$MAX_ATTEMPTS] starting (branch feature/$slug)"
 # --- 5. Run the workflow (own process group, so a timeout can stop the agents too) ---------------
 # Trusted intent-git.sh (from the base branch, kept in memory) and the git hooks/config baseline: the
 # workflow re-checks it before each of its git steps, and this script checks it again after the run.
-trust=$(git rev-parse "$base") && IG=$(git show "$trust:scripts/intent-git.sh") && [ -n "$IG" ] \
-  || stop "scripts/intent-git.sh is not committed on $base" 1
+trust=$(git rev-parse "$base") && IG=$(git show "$trust:.intent-loop/intent-git.sh") && [ -n "$IG" ] \
+  || stop ".intent-loop/intent-git.sh is not committed on $base" 1
 ig() { INTENT_TRUST=$trust bash -c "$IG" intent-git.sh "$@"; }
 meta0=$(ig git-meta "$id" "$slug" "$base") && [ -n "$meta0" ] || stop "cannot hash git hooks/config" 1
 LOG=.task-state/logs/$id-$n.log
