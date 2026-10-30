@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// task-state.js — status reporting for the intent-to-merge workflow.
+// task-state.js — status reporting for the sdlc workflow.
 // Writes intents.<task_id> into <project>/.task-state/state.json, atomically.
 //
 // Usage:

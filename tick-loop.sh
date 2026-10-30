@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run orchestrator ticks one after another until the loop is done or needs a human.
 # Run from the target repo (like scripts/orchestrate-tick.sh):  .intent-loop/tick-loop.sh [intents-folder]
-# Each tick runs one intent through intent-to-merge and ends with LOOP: CONTINUE or LOOP: STOP (<reason>);
+# Each tick runs one intent through the sdlc workflow and ends with LOOP: CONTINUE or LOOP: STOP (<reason>);
 # this starts the next tick only after LOOP: CONTINUE. The intents folder is only needed for the first
 # tick (the state file remembers it). Env is passed through to orchestrate-tick.sh (MAX_ATTEMPTS, ...).
 set -uo pipefail

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One deterministic tick of the intent orchestrator (see .claude/skills/intent-orchestrator/SKILL.md).
 # Run from the target repo (REPO = cwd):  orchestrate-tick.sh [intents-folder]
-# Picks the next eligible intent, runs the intent-to-merge workflow on it, judges the result from the
+# Picks the next eligible intent, runs the sdlc workflow on it, judges the result from the
 # state file, parks an intent whose attempts are exhausted, and ends with exactly one line:
 #   LOOP: CONTINUE | LOOP: STOP (<reason>)
 # Exit code: 0 when the tick ran normally (whatever the outcome), 1 on a preflight/setup error.
@@ -12,7 +12,7 @@ set -uo pipefail
 for v in $(env | grep -oE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)='); do unset "${v%=}"; done
 
 LOOP_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-WORKFLOW=${WORKFLOW:-$LOOP_HOME/intent-to-merge.yaml}
+WORKFLOW=${WORKFLOW:-$LOOP_HOME/sdlc.yaml}
 TOOLING=${TOOLING:-$LOOP_HOME/scripts/task-state.js}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 TICK_TIMEOUT=${TICK_TIMEOUT:-6000}

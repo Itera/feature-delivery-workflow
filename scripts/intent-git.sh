@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deterministic git steps for the intent-to-merge workflow (run from the repo root).
+# Deterministic git steps for the sdlc workflow (run from the repo root).
 #   intent-git.sh branch <task_id> <branch_slug> <base_branch>   create/reuse feature/<slug>, reset verdicts
 #       (first aborts any merge/rebase/cherry-pick/revert left in progress by an interrupted run and
 #        stops processes recorded in .task-state/pids-* that are still running, see kill_recorded)

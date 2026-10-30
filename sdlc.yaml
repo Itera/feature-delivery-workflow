@@ -1,4 +1,4 @@
-name: intent-to-merge
+name: sdlc
 version: "1.0"
 description: 'Pass task_id explicitly (e.g. the intent file basename); it defaults to "intent". Generic intent-driven dev loop: branch -> implement -> test -> review -> validate -> conditional merge, from a single intent markdown file.'
 metadata:
