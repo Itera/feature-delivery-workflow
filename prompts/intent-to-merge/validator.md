@@ -11,7 +11,7 @@ End (CRITICAL — the gate reads the verdict from the state file, not from your 
    <feedback for the implementer, see below>
    FEEDBACK
    ```
- Never use `2>/dev/null` or `|| true` on this command. On an unrecoverable error (crash, cannot start, tool denied repeatedly) record FAIL and name the error in the feedback.
+ Never use `2>/dev/null` or `|| true` on this command. Run it on its own, as the entire shell call: nothing before or after it (no `&&`, `;` or `|`, and no further command after the heredoc). Your shell permissions are checked for every command in a call, and a call that contains any command you may not run is refused as a whole, so a combined call loses the verdict. If the call is refused or fails, run the verdict command again, alone; never finish without it having printed your token back. On an unrecoverable error (crash, cannot start, tool denied repeatedly) record FAIL and name the error in the feedback.
 
 ## Intent issue (rare: it stops this intent until a human edits it)
 Record INTENT_ISSUE instead of FAIL only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
