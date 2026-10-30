@@ -41,9 +41,11 @@ jget() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{let v=
 [ -x "$DF_BIN" ] || stop "digital-factory binary not found: $DF_BIN; set DF_BIN to its path" 1
 
 # --- 1. Preflight -------------------------------------------------------------------------------
-if ! git rev-parse --git-dir >/dev/null 2>&1; then
-  git init -q -b main && say "preflight: initialised git repo (branch main)"
-fi
+# Run from the project's root folder only: never create a repo, or work in a folder the loop does not belong to.
+top=$(git rev-parse --show-toplevel 2>/dev/null) \
+  || stop "not a git repository: $REPO. Run the loop from the project's folder (a new project needs git init first)" 1
+[ "$(cd "$top" && pwd -P)" = "$REPO" ] || stop "run the loop from the project's root folder ($top), not from $REPO" 1
+[ "$LOOP_HOME" = "$REPO/.intent-loop" ] || stop "this loop ($LOOP_HOME) is not this project's .intent-loop/; run the project's own .intent-loop/tick-loop.sh" 1
 if ! git rev-parse -q --verify HEAD >/dev/null; then
   # Empty commit only: never stage whatever happens to be in the folder (could be secrets).
   git commit -q --allow-empty -m "Initial commit" && say "preflight: created empty initial commit"
