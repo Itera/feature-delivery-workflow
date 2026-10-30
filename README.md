@@ -24,7 +24,6 @@ planning/intents/*.md + .task-state/state.json        (written by the intent-pla
 | `scripts/intent-guard-ignore` | Paths the reviewer/validator may change while running the app |
 | `package.json` | Marks the scripts as CommonJS, whatever the project uses |
 | `skills/intent-orchestrator/` | Agent skill that runs one tick (`/intent-orchestrator`; in Claude Code also under `/loop`) |
-| `install.sh` | Optional: does the steps below for you |
 
 ## Using it in a project
 
@@ -39,15 +38,8 @@ In the project (a git repo on `main` whose test command already passes):
 5. Commit on `main`, and set `git config user.name` / `user.email` in the project (the loop commits).
 6. Run `.intent-loop/scripts/tick-loop.sh` (all intents) or `.intent-loop/scripts/orchestrate-tick.sh` (one).
 
-Or let the installer do steps 1–4, run from the project:
-
-```sh
-<intent-loop>/install.sh --test "npm test"      # first install
-<intent-loop>/install.sh --update               # newer loop version, keeps the project's test command
-```
-
-It also records the loop's version in `.intent-loop/VERSION`. It does not commit, and `--update` refuses to
-overwrite uncommitted changes to the loop.
+To update the loop later, replace `.intent-loop/` with the newer version the same way and set `test_command`
+again.
 
 `BROWSER_CHECK=0` skips the Chromium check for projects without a UI; `DF_BIN` points to the engine if it is
 not on the PATH, in `~/.digital-factory` or in a `.digital-factory` folder above the project.
