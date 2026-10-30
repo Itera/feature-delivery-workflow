@@ -8,7 +8,7 @@ argument-hint: "[intents-folder]"
 
 The whole tick is done by a deterministic script; your job is only to run it, relay its progress and act on its last line. You never implement, test, review, merge, commit, edit the state file or pick an intent yourself.
 
-- TICK = `/Users/peter.jezik/dev/AI-dev/doWeNeedDevloop/scripts/orchestrate-tick.sh`
+- TICK = `scripts/orchestrate-tick.sh` in REPO (the project's own copy of the loop).
 - REPO = the current working directory.
 
 ## Procedure

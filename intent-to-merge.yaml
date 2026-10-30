@@ -34,8 +34,9 @@ variables:
     # snapshot-before-tests takes it. Every later step stops the run if hooks or config changed since.
     git_meta: ""
     # Fixed test gate, run from the repo root with sh -c; its exit code is the test verdict. Passed
-    # verbatim through a quoted heredoc, so any quoting is fine (single line only).
-    test_command: cd app && npm run build && npm test
+    # verbatim through a quoted heredoc, so any quoting is fine (single line only). Set it per project
+    # (e.g. `npm test`, `cd app && npm run build && npm test`, `pytest`); the default assumes npm.
+    test_command: npm test
 agents:
     - id: test-author
       type: tester

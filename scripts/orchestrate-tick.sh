@@ -17,8 +17,16 @@ TOOLING=${TOOLING:-$LOOP_HOME/scripts/task-state.js}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
 TICK_TIMEOUT=${TICK_TIMEOUT:-6000}
 POLL=${POLL:-10}
+# The engine: DF_BIN, else on the PATH, else the usual install in the home folder, else a .digital-factory
+# folder in one of the project's parent folders (an engine kept next to the projects).
 if [ -z "${DF_BIN:-}" ]; then
-  DF_BIN=$(command -v digital-factory 2>/dev/null || echo "$LOOP_HOME/../.digital-factory/digital-factory")
+  DF_SEARCHED="PATH, $HOME/.digital-factory"
+  DF_BIN=$(command -v digital-factory 2>/dev/null) || DF_BIN=$HOME/.digital-factory/digital-factory
+  d=$(dirname "$LOOP_HOME")
+  while [ ! -x "$DF_BIN" ] && [ "$d" != / ]; do
+    DF_BIN=$d/.digital-factory/digital-factory; DF_SEARCHED="$DF_SEARCHED, $d/.digital-factory"; d=$(dirname "$d")
+  done
+  [ -x "$DF_BIN" ] || DF_BIN="digital-factory (searched: $DF_SEARCHED)"
 fi
 REPO=$(pwd -P)
 ARG=${1:-}
@@ -30,7 +38,7 @@ ts() { "$TS" "$@"; }
 jget() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{let v=JSON.parse(d);for(const k of process.argv[1].split(".")){v=v==null?v:v[k]}process.stdout.write(v==null?"":typeof v==="object"?JSON.stringify(v):String(v))})' "$1"; }
 
 [ -f "$WORKFLOW" ] || stop "workflow not found: $WORKFLOW" 1
-[ -x "$DF_BIN" ] || stop "digital-factory binary not found: $DF_BIN (set DF_BIN)" 1
+[ -x "$DF_BIN" ] || stop "digital-factory binary not found: $DF_BIN; set DF_BIN to its path" 1
 
 # --- 1. Preflight -------------------------------------------------------------------------------
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
