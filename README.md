@@ -5,7 +5,7 @@ each, writes acceptance tests, implements, tests, reviews, validates and merges 
 
 ```
 planning/intents/*.md + .task-state/state.json        (written by the intent-planner skill)
-  └─ .intent-loop/scripts/tick-loop.sh                 ticks until LOOP: STOP
+  └─ .intent-loop/tick-loop.sh                         ticks until LOOP: STOP
        └─ .intent-loop/scripts/orchestrate-tick.sh     one tick = one intent
             └─ digital-factory workflow run .intent-loop/intent-to-merge.yaml
                  branch -> write tests -> lock -> implement -> test gate -> review -> validate -> merge
@@ -15,10 +15,10 @@ planning/intents/*.md + .task-state/state.json        (written by the intent-pla
 
 | File | What it is |
 |---|---|
+| `tick-loop.sh` | Runs the loop: ticks until `LOOP: STOP` (the command you run) |
 | `intent-to-merge.yaml` | The workflow: agents, models, tasks and their gates; `metadata.stages` groups the tasks for the workflow dashboard |
 | `prompts/` | Prompts of the agents: test-author, implementer, tester, reviewer, validator, reporter (found next to the workflow) |
 | `scripts/orchestrate-tick.sh` | One tick: picks the next intent, runs the workflow on it, judges the result, prints `LOOP: CONTINUE` or `LOOP: STOP (<reason>)` |
-| `scripts/tick-loop.sh` | Runs ticks until `LOOP: STOP` |
 | `scripts/intent-git.sh` | The git steps (branch, snapshot, gates, merge, park) and the tamper guards, run from the committed base branch |
 | `scripts/task-state.js` | Reads and writes `.task-state/state.json` |
 | `scripts/intent-guard-ignore` | Paths the reviewer/validator may change while running the app |
@@ -36,7 +36,7 @@ In the project (a git repo on `main` whose test command already passes):
 3. Optionally copy `.intent-loop/skills/intent-orchestrator/` to `.claude/skills/` (or your agent's skills folder).
 4. Add `.task-state/`, `.digital-factory/`, `.digital-factory-outputs/`, `.copilot-cache/` and `.code-compass/` to `.gitignore`.
 5. Commit on `main`, and set `git config user.name` / `user.email` in the project (the loop commits).
-6. Run `.intent-loop/scripts/tick-loop.sh` (all intents) or `.intent-loop/scripts/orchestrate-tick.sh` (one).
+6. Run `.intent-loop/tick-loop.sh` (all intents) or `.intent-loop/scripts/orchestrate-tick.sh` (one).
 
 To update the loop later, replace `.intent-loop/` with the newer version the same way and set `test_command`
 again.

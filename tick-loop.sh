@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Run orchestrator ticks one after another until the loop is done or needs a human.
-# Run from the target repo (like orchestrate-tick.sh):  tick-loop.sh [intents-folder]
+# Run from the target repo (like scripts/orchestrate-tick.sh):  .intent-loop/tick-loop.sh [intents-folder]
 # Each tick runs one intent through intent-to-merge and ends with LOOP: CONTINUE or LOOP: STOP (<reason>);
 # this starts the next tick only after LOOP: CONTINUE. The intents folder is only needed for the first
 # tick (the state file remembers it). Env is passed through to orchestrate-tick.sh (MAX_ATTEMPTS, ...).
 set -uo pipefail
-TICK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/orchestrate-tick.sh
+TICK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/scripts/orchestrate-tick.sh
 n=1
 while :; do
   out=$(mktemp)
