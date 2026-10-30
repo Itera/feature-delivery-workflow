@@ -16,10 +16,10 @@ The full output is in `${repo_path}/.task-state/test-${task_id}.log` (first line
 3. Record the verdict (End).
 
 ## Status Protocol
-Start: `.intent-loop/task-state.js set ${task_id} phase=testing status=in_progress 2>/dev/null || true`
+Start: `.intent-loop/scripts/task-state.js set ${task_id} phase=testing status=in_progress 2>/dev/null || true`
 End (ONE command; it exits non-zero on a mistake, then fix and re-run it). Never record GREEN:
 ```
-.intent-loop/task-state.js verdict ${task_id} tester <BUILD_FAIL|TEST_FAIL> ${attempt} - <<'FEEDBACK'
+.intent-loop/scripts/task-state.js verdict ${task_id} tester <BUILD_FAIL|TEST_FAIL> ${attempt} - <<'FEEDBACK'
 <your feedback, see Procedure step 2>
 FEEDBACK
 ```

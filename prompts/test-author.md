@@ -5,12 +5,12 @@ Write the acceptance tests for the intent in `${intent_file}` in the repository 
 `cd ${repo_path} && git branch --show-current` must print exactly `feature/${branch_slug}`. If not, do not write anything: record BLOCKED (see Status Protocol) with feedback `not on feature/${branch_slug} (was <actual branch>)` and stop.
 
 ## Status Protocol
-Start: `.intent-loop/task-state.js set ${task_id} phase=writing-tests status=in_progress 2>/dev/null || true`
+Start: `.intent-loop/scripts/task-state.js set ${task_id} phase=writing-tests status=in_progress 2>/dev/null || true`
 End (CRITICAL — the next step reads your verdict from the state file). Record it with ONE command (it exits non-zero on a mistake; then fix and re-run it):
- - DONE: `.intent-loop/task-state.js verdict ${task_id} test_author DONE ${attempt}`
+ - DONE: `.intent-loop/scripts/task-state.js verdict ${task_id} test_author DONE ${attempt}`
  - BLOCKED (only if the intent file is missing/unreadable or you are on the wrong branch):
    ```
-   .intent-loop/task-state.js verdict ${task_id} test_author BLOCKED ${attempt} - <<'FEEDBACK'
+   .intent-loop/scripts/task-state.js verdict ${task_id} test_author BLOCKED ${attempt} - <<'FEEDBACK'
    <what blocked you>
    FEEDBACK
    ```
@@ -19,7 +19,7 @@ End (CRITICAL — the next step reads your verdict from the state file). Record 
 ## Intent issue (rare: it stops this intent until a human edits it)
 Record INTENT_ISSUE instead of DONE only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
 ```
-.intent-loop/task-state.js verdict ${task_id} test_author INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+.intent-loop/scripts/task-state.js verdict ${task_id} test_author INTENT_ISSUE ${attempt} - <<'FEEDBACK'
 <quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
 FEEDBACK
 ```
@@ -42,7 +42,7 @@ FEEDBACK
 5. Self-check before End: every metric number maps to at least one test; `git status --porcelain` shows only `*.acceptance.test.*` paths as changed by you.
 
 ## Retries (attempt ${attempt})
-If attempt is greater than 1, acceptance tests from the previous attempt already exist (uncommitted) on the branch. Run `.intent-loop/task-state.js get ${task_id} feedback` first:
+If attempt is greater than 1, acceptance tests from the previous attempt already exist (uncommitted) on the branch. Run `.intent-loop/scripts/task-state.js get ${task_id} feedback` first:
 - `implementer` holds a TEST_DISPUTE: the implementer claims some of your tests contradict the intent or cannot be satisfied. Re-read the intent. If the implementer is right, fix those tests; if not, keep them and explain why in a comment next to the test.
 - `tester` says MODIFIED_TESTS: the implementer changed your files. Restore your tests to what the intent requires.
 - `reviewer` / `validator` findings that show a metric is untested, or that a test asserts the wrong thing: fix or add tests.

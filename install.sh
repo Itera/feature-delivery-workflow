@@ -2,7 +2,8 @@
 # Install the intent loop into a project, or update it there. Run from the project (a git repo):
 #   <intent-loop>/install.sh [--test "<test command>"]   first install (default test command: npm test)
 #   <intent-loop>/install.sh --update [--test "<cmd>"]    newer loop version; keeps the project's test command
-# Copies loop/ to .intent-loop/ and skills/intent-orchestrator/ to .claude/skills/intent-orchestrator/,
+# Copies this repo (without .git and this script) to .intent-loop/ and its skills/intent-orchestrator/ also to
+# .claude/skills/intent-orchestrator/,
 # sets test_command in .intent-loop/intent-to-merge.yaml, records the version in .intent-loop/VERSION and
 # adds the loop's runtime folders to .gitignore. It does not commit: review the changes and commit them on
 # the base branch (the loop runs its scripts from that commit).
@@ -43,9 +44,10 @@ fi
 test_cmd=${test_cmd:-npm test}
 
 mkdir -p "$DEST" "$(dirname "$SKILL")"
-cp -R "$SRC/loop/." "$DEST/"
+cp -R "$SRC/." "$DEST/"
+rm -rf "$DEST/.git" "$DEST/.idea" "$DEST/install.sh"
 cp -R "$SRC/skills/intent-orchestrator" "$SKILL"
-chmod +x "$DEST"/*.sh "$DEST/task-state.js"
+chmod +x "$DEST"/scripts/*.sh "$DEST/scripts/task-state.js"
 
 grep -q '^    test_command: ' "$WF" || die "test_command not found in $WF"
 TC=$test_cmd perl -pi -e 's/^    test_command: .*$/    test_command: $ENV{TC}/' "$WF"
@@ -66,4 +68,4 @@ echo "  $SKILL/  /intent-orchestrator skill"
 echo "next:"
 echo "  1. review and commit on the base branch:  git add $DEST $SKILL .gitignore && git commit -m 'intent loop $version'"
 [ -n "$(git config user.email || true)" ] || echo "  2. set a git identity for the loop's commits:  git config user.name ... && git config user.email ..."
-echo "  run:  $DEST/tick-loop.sh   (all intents; $DEST/orchestrate-tick.sh runs one)"
+echo "  run:  $DEST/scripts/tick-loop.sh   (all intents; $DEST/scripts/orchestrate-tick.sh runs one)"
