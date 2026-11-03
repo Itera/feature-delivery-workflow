@@ -1,4 +1,4 @@
-# sdlc-workflow-with-loop-orchestrator
+# SDLC Workflow (with loop orchestrator)
 
 The sdlc workflow and its loop orchestrator for the digital-factory engine: it takes intent files one by one and, for
 each, writes acceptance tests, implements, tests, reviews, validates and merges it into the base branch.
