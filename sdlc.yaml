@@ -39,8 +39,12 @@ variables:
     plan_hash: ""
     # Fixed test gate, run from the repo root with sh -c; its exit code is the test verdict. Passed
     # verbatim through a quoted heredoc, so any quoting is fine (single line only). Set it per project
-    # (e.g. `npm test`, `cd app && npm run build && npm test`, `pytest`); the default assumes npm.
+    # (e.g. `npm test`, `pytest`); the default assumes npm.
     test_command: npm test
+    # Build check of the test gate, run before test_command (always both) the same way, e.g. `npm run build`
+    # (with a type check). Empty = no build check. Its failure is BUILD_FAIL, or ACCEPTANCE_TESTS_BUILD_FAIL
+    # when only acceptance test files break it (fixed by the test author; the attempt is not counted).
+    build_command: ""
 agents:
     - id: test-author
       type: tester
@@ -275,7 +279,8 @@ tasks:
         - snapshot-before-review
     - id: run-tests
       name: run-tests
-      # Deterministic test gate (replaces an LLM verdict): runs ${test_command}, prints GREEN|TEST_FAIL|NOT_RUN.
+      # Deterministic test gate (replaces an LLM verdict): runs ${build_command} (if set) and ${test_command}, records
+      # the verdict (GREEN|TEST_FAIL|BUILD_FAIL|ACCEPTANCE_TESTS_BUILD_FAIL) and prints GREEN|TEST_GATE_FAIL|NOT_RUN.
       # No when: on purpose. It prints NOT_RUN unless the implementer finished this attempt, and gate-test
       # reads its output: the engine fails the read of a when-skipped task even with the ?-suffix.
       type: command
@@ -291,7 +296,11 @@ tasks:
           ${test_command}
           __INTENT_TEST_COMMAND__
             )
-          bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "$tc"
+          bc=$(cat <<'__INTENT_BUILD_COMMAND__'
+          ${build_command}
+          __INTENT_BUILD_COMMAND__
+            )
+          bash -c "$s" intent-git.sh run-tests "${task_id}" "${branch_slug}" "${base_branch}" "${attempt}" "$tc" "$bc"
           true
       depends_on:
         - implement
@@ -299,10 +308,10 @@ tasks:
         - snapshot-before-tests
     - id: summarise-test-failure
       name: summarise-test-failure
-      description: Summarise the failed test log into feedback.tester, following your prompt.
+      description: Summarise the failed test gate log into feedback.tester, following your prompt.
       type: standard
       agent: tester
-      when: "${tasks.run-tests.output?} == TEST_FAIL"
+      when: "${tasks.run-tests.output?} == TEST_GATE_FAIL"
       depends_on:
         - run-tests
     - id: snapshot-before-tests

@@ -5,7 +5,8 @@
 # state file, parks an intent whose attempts are exhausted, and ends with exactly one line:
 #   LOOP: CONTINUE | LOOP: STOP (<reason>)
 # Exit code: 0 when the tick ran normally (whatever the outcome), 1 on a preflight/setup error.
-# Env overrides: MAX_ATTEMPTS (3), TICK_TIMEOUT seconds (6000, backstop for a hung run),
+# Env overrides: MAX_ATTEMPTS (3), MAX_TEST_FIXES (2: free retries per intent when only the acceptance tests do
+#   not build, ACCEPTANCE_TESTS_BUILD_FAIL; not counted as attempts), TICK_TIMEOUT seconds (6000, backstop for a hung run),
 #   WORKFLOW, TOOLING (task-state.js), DF_BIN (digital-factory binary), POLL (10 s),
 #   BROWSER_CHECK (1; 0 skips the Chromium preflight), PW_DIR (~/.cache/intent-orchestrator/pw).
 set -uo pipefail
@@ -15,6 +16,7 @@ LOOP_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 WORKFLOW=${WORKFLOW:-$LOOP_HOME/sdlc.yaml}
 TOOLING=${TOOLING:-$LOOP_HOME/scripts/task-state.js}
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-3}
+MAX_TEST_FIXES=${MAX_TEST_FIXES:-2}
 TICK_TIMEOUT=${TICK_TIMEOUT:-6000}
 POLL=${POLL:-10}
 # The engine: DF_BIN, else on the PATH, else the usual install in the home folder, else a .digital-factory
@@ -145,7 +147,10 @@ fi
 
 # --- 4. Record the attempt ----------------------------------------------------------------------
 ts set "$id" "attempts=$n" status=in_progress >/dev/null || stop "cannot record attempt" 1
-say "[$id #$n/$MAX_ATTEMPTS] starting (branch feature/$slug)"
+# Free retries (test_fixes) get their own attempt number but do not count toward MAX_ATTEMPTS.
+fixes=$(ts get "$id" test_fixes 2>/dev/null); case "$fixes" in ''|*[!0-9]*) fixes=0 ;; esac
+counted() { [ "$fixes" -eq 0 ] && echo "$n/$MAX_ATTEMPTS" || echo "$n (counted $((n - fixes))/$MAX_ATTEMPTS, $fixes free)"; }
+say "[$id #$(counted)] starting (branch feature/$slug)"
 
 # --- 5. Run the workflow (own process group, so a timeout can stop the agents too) ---------------
 # Trusted intent-git.sh (from the base branch, kept in memory) and the git hooks/config baseline: the
@@ -238,10 +243,26 @@ case "$status" in
     outcome="FAILED at $(ts get "$id" phase 2>/dev/null)" ;;
 esac
 
+# Only the acceptance tests did not build: the test author fixes them on a free retry (the attempt is not counted),
+# at most MAX_TEST_FIXES times per intent; then a human looks at them.
+free=no
+case "$outcome" in FAILED*)
+  if [ "$(ts get "$id" verdicts.tester 2>/dev/null)" = ACCEPTANCE_TESTS_BUILD_FAIL ] && [ "$(ts get "$id" verdicts.tester_attempt 2>/dev/null)" = "$n" ]; then
+    if [ "$fixes" -lt "$MAX_TEST_FIXES" ]; then
+      fixes=$((fixes + 1)); free=yes
+      ts set "$id" "test_fixes=$fixes" >/dev/null
+      outcome="FAILED: acceptance tests do not build (free retry $fixes/$MAX_TEST_FIXES for the test author, not counted)"
+    else
+      ts set "$id" status=needs_human "feedback.engine=ACCEPTANCE_TESTS_BUILD_FAIL: the acceptance tests still do not build after $MAX_TEST_FIXES free retries of the test author (see feedback.tester and .task-state/test-$id.log). Fix the *.acceptance.test.* files on feature/$slug, or the intent, then retry with status=pending." >/dev/null
+      outcome="NEEDS HUMAN (acceptance tests do not build)"
+    fi
+  fi ;;
+esac
+
 # --- 7. Park an exhausted intent or one with an intent issue (frees the tree for other intents) ----
 park=no
 case "$outcome" in
-  FAILED*) [ "$n" -ge "$MAX_ATTEMPTS" ] && park=yes ;;
+  FAILED*) [ "$free" = no ] && [ $((n - fixes)) -ge "$MAX_ATTEMPTS" ] && park=yes ;;
   "NEEDS HUMAN (intent issue"*) park=yes ;;
 esac
 if [ "$park" = yes ] && [ "$meta_bad" = no ]; then
@@ -251,7 +272,7 @@ fi
 # --- 8. Report and decide -----------------------------------------------------------------------
 say "---"
 say "intent:   $id"
-say "attempt:  $n/$MAX_ATTEMPTS"
+say "attempt:  $(counted)"
 say "outcome:  $outcome"
 case "$outcome" in
   COMPLETED*) ;;

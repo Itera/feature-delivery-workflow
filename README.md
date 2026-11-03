@@ -32,14 +32,31 @@ there, **in a folder named `.intent-loop/`** (its scripts and the agents refer t
 In the project (a git repo on `main` whose test command already passes):
 
 1. Put this repo's files in `.intent-loop/` (download the zip from GitHub, or clone it and delete its `.git`).
-2. Set `test_command` in `.intent-loop/sdlc.yaml` to the project's test command (default `npm test`).
+2. Set `test_command` in `.intent-loop/sdlc.yaml` to the project's test command (default `npm test`), and
+   `build_command` to its build with a type check (e.g. `npm run build`; empty = no build check).
 3. Optionally copy `.intent-loop/skills/intent-orchestrator/` to `.claude/skills/` (or your agent's skills folder).
 4. Add `.task-state/`, `.digital-factory/`, `.digital-factory-outputs/`, `.copilot-cache/` and `.code-compass/` to `.gitignore`.
 5. Commit on `main`, and set `git config user.name` / `user.email` in the project (the loop commits).
 6. Run `.intent-loop/tick-loop.sh` (all intents) or `.intent-loop/scripts/orchestrate-tick.sh` (one).
 
 To update the loop later, replace `.intent-loop/` with the newer version the same way and set `test_command`
-again.
+and `build_command` again.
+
+## The test gate
+
+After the implementer, the gate runs `build_command` (if set) and then `test_command`, always both, into
+`.task-state/test-<intent>.log`, and records one verdict (`verdicts.tester`):
+
+| Verdict | When | Who fixes it on the next attempt |
+|---|---|---|
+| `GREEN` | build and tests pass | — |
+| `TEST_FAIL` | the build passes, tests fail | implementer |
+| `BUILD_FAIL` | the build fails in the app code (also when test files fail too, or a test imports something the code does not provide) | implementer |
+| `ACCEPTANCE_TESTS_BUILD_FAIL` | the build fails only in `*.acceptance.test.*` files | test author; the attempt is not counted (at most `MAX_TEST_FIXES`, default 2, then the intent needs a human) |
+
+In the workflow the step's output is `GREEN` or `TEST_GATE_FAIL`; the verdict says which failure. The
+`build`/`typecheck` scripts in package.json are locked with the test scripts, so the implementer cannot weaken
+them.
 
 `BROWSER_CHECK=0` skips the Chromium check for projects without a UI; `DF_BIN` points to the engine if it is
 not on the PATH, in `~/.digital-factory` or in a `.digital-factory` folder above the project.

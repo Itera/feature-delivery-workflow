@@ -24,12 +24,16 @@
 #   intent-git.sh lock-tests <task_id> <slug> <base> <tree> <head> <attempt>
 #       After the test author: verify it changed only acceptance tests and wrote/kept some for this
 #       intent, then print a hash of all acceptance tests (the workflow keeps it in the task output).
-#   intent-git.sh run-tests <task_id> <slug> <base> <attempt> <test_command>
-#       Deterministic test gate: run <test_command> from the repo root if the implementer finished,
-#       log to .task-state/test-<task_id>.log, record verdicts.tester, print GREEN|TEST_FAIL|NOT_RUN.
+#   intent-git.sh run-tests <task_id> <slug> <base> <attempt> <test_command> [<build_command>]
+#       Deterministic test gate: if the implementer finished, run <build_command> (if given) and then
+#       <test_command> from the repo root, always both, into .task-state/test-<task_id>.log. Records
+#       verdicts.tester: GREEN, TEST_FAIL (tests failed), BUILD_FAIL (the build failed in the app code) or
+#       ACCEPTANCE_TESTS_BUILD_FAIL (it failed only in *.acceptance.test.* files: the test author fixes them,
+#       the tick does not count the attempt). Prints GREEN, TEST_GATE_FAIL (any of the three failures; the
+#       verdict says which) or NOT_RUN.
 #   intent-git.sh check-tests <task_id> <slug> <base> "<accept_hash> <setup_hash>" <run_result>
 #       Exit 1 (recording verdicts.tester=MODIFIED_TESTS|MODIFIED_TEST_SETUP) if the acceptance tests or
-#       the test setup (package.json test scripts, test runner config) changed since lock-tests.
+#       the test setup (package.json test and build scripts, test runner config) changed since lock-tests.
 #   intent-git.sh gate <task_id> <slug> <base> reviewer|validator <attempt> <tree> <head>
 #       Print the role's verdict for this attempt; a passing verdict only if the tamper guard is clean.
 # Trust: the workflow resolves the base commit once, before any agent runs (snapshot-before-tests, field
@@ -58,8 +62,9 @@ state=.intent-loop/scripts/task-state.js
 excl=(':(exclude).task-state' ':(exclude).intent-loop/scripts/task-state.js' ':(exclude).copilot-cache' ':(exclude).digital-factory' ':(exclude).digital-factory-outputs')
 # Acceptance tests written by the test author from the intent's Success Metrics (locked for the implementer).
 ACCEPT=':(glob)**/*.acceptance.test.*'
-# Test setup locked together with the acceptance tests: (pre|post)test* scripts of every package.json and
-# test runner config files. The implementer cannot make the acceptance tests skip by changing these.
+# Test setup locked together with the acceptance tests: (pre|post)test*, (pre|post)build* and typecheck* scripts of
+# every package.json and test runner config files. The implementer cannot make the acceptance tests skip, or the
+# build gate pass, by changing these.
 SETUP_CFG=(':(glob)**/vitest.config.*' ':(glob)**/vitest.workspace.*' ':(glob)**/jest.config.*' ':(glob)**/.mocharc*'
   ':(glob)**/playwright.config.*' ':(glob)**/karma.conf.*' ':(glob)**/ava.config.*' ':(glob)**/.nycrc*' ':(glob)**/.c8rc*'
   ':(glob)**/pytest.ini' ':(glob)**/conftest.py')
@@ -178,12 +183,20 @@ accept_hash() {
   [ -n "$list" ] || return 1
   printf %s "$list" | git hash-object --stdin
 }
+# Source files named as the location of an error in a build log (one per error line, relative to the repo).
+build_error_files() {
+  awk 'tolower($0) ~ /error/ && match($0, /[A-Za-z0-9_.@\/+-]+\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue|svelte|astro|py|go|rs|java|kt|cs|rb|php)/) { print substr($0, RSTART, RLENGTH) }' "$1" \
+    | sed -e "s#^$PWD/##" -e 's#^\./##' | sort -u
+}
+# Build errors that are the implementer's part even inside a test file: the test imports something the code
+# does not provide yet (missing module, export or member).
+CONTRACT_ERRORS='TS2305|TS2307|TS2339|TS2551|TS2614|TS2724|Cannot find module|has no exported member|does not provide an export|is not exported'
 # Hash over the test setup (see SETUP_CFG); always prints a hash.
 setup_hash() {
   local f list=""
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    list+="$f $(node -e 'let o={};try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scripts||{};for(const k of Object.keys(s).sort())if(/^(pre|post)?test($|:)/.test(k))o[k]=s[k]}catch(e){o="unparsable"}process.stdout.write(JSON.stringify(o))' "$f")"$'\n'
+    list+="$f $(node -e 'let o={};try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scripts||{};for(const k of Object.keys(s).sort())if(/^((pre|post)?(test|build)|typecheck)($|:)/.test(k))o[k]=s[k]}catch(e){o="unparsable"}process.stdout.write(JSON.stringify(o))' "$f")"$'\n'
   done < <(git ls-files -co --exclude-standard -- ':(glob)**/package.json' | sort -u)
   while IFS= read -r f; do
     if [ -f "$f" ]; then list+="$f $(git hash-object -- "$f")"$'\n'; fi
@@ -362,7 +375,7 @@ lock-tests)
   printf '%s %s' "$h" "$su"
   ;;
 run-tests)
-  attempt=${5:-}; tcmd=${6:-}
+  attempt=${5:-}; tcmd=${6:-}; bcmd=${7:-}
   [ -n "$tcmd" ] || { printf NOT_RUN; echo "run-tests: empty test_command" >&2; exit 1; }
   [ "$(git branch --show-current)" = "$feature" ] || { printf NOT_RUN; echo "run-tests: not on $feature" >&2; exit 1; }
   v=$(ts get "$task_id" verdicts.implementer 2>/dev/null); a=$(ts get "$task_id" verdicts.implementer_attempt 2>/dev/null)
@@ -373,22 +386,45 @@ run-tests)
     printf PROTECTED; echo "run-tests: protected files changed: $pc" >&2; exit 0
   fi
   st phase=testing status=in_progress
-  log=.task-state/test-$task_id.log
+  log=.task-state/test-$task_id.log blog=.task-state/build-$task_id.log
   mkdir -p .task-state
-  { echo "\$ $tcmd"; sh -c "$tcmd" </dev/null; } >"$log" 2>&1; rc=$?
+  # Build first, then the tests, always both: one attempt reports every problem.
+  brc=0
+  if [ -n "$bcmd" ]; then { echo "\$ $bcmd"; sh -c "$bcmd" </dev/null; } >"$blog" 2>&1; brc=$?; fi
+  {
+    if [ -n "$bcmd" ]; then
+      echo "===== BUILD: $([ $brc -eq 0 ] && echo passed || echo "FAILED (exit $brc)")"
+      cat "$blog"; echo
+      echo "===== TESTS"
+    fi
+    echo "\$ $tcmd"; sh -c "$tcmd" </dev/null
+  } >"$log" 2>&1; rc=$?
   why=""
   if [ $rc -ne 0 ]; then why="exit code $rc"
   elif grep -Eq '^(ℹ|#) tests 0$' "$log"; then why="the test runner executed 0 tests"
   fi
-  if [ -z "$why" ]; then
-    st phase=tested status=in_progress verdicts.tester=GREEN "verdicts.tester_attempt=$attempt" feedback.tester=
-    printf GREEN
-  else
-    # Fallback feedback; the summariser agent replaces it with a curated one.
-    st phase=tested status=escalated verdicts.tester=TEST_FAIL "verdicts.tester_attempt=$attempt" \
-      "feedback.tester=\`$tcmd\` failed ($why). Last lines of the log: $(tail -n 30 "$log")"
-    printf TEST_FAIL
+  verdict=GREEN
+  if [ $brc -ne 0 ]; then
+    files=$(build_error_files "$blog"); acc=$(printf '%s\n' "$files" | grep -E '\.acceptance\.test\.' || true)
+    other=$(printf '%s\n' "$files" | grep -vE '\.acceptance\.test\.' | grep . || true)
+    if [ -n "$acc" ] && [ -z "$other" ] && ! grep -Eq "$CONTRACT_ERRORS" "$blog"; then verdict=ACCEPTANCE_TESTS_BUILD_FAIL
+    else verdict=BUILD_FAIL; fi
+  elif [ -n "$why" ]; then verdict=TEST_FAIL
   fi
+  rm -f "$blog"
+  case $verdict in
+    GREEN)
+      st phase=tested status=in_progress verdicts.tester=GREEN "verdicts.tester_attempt=$attempt" feedback.tester=
+      printf GREEN; exit 0 ;;
+    BUILD_FAIL) fb="\`$bcmd\` failed (exit $brc)${why:+; the tests failed too ($why), possibly because of the build errors}" ;;
+    ACCEPTANCE_TESTS_BUILD_FAIL) fb="\`$bcmd\` failed (exit $brc) only in acceptance test files ($(printf '%s' "$acc" | paste -sd ' ' -)): the test author must fix them; this attempt is not counted${why:+. The tests failed too ($why), possibly because of those files}" ;;
+    TEST_FAIL) fb="\`$tcmd\` failed ($why)" ;;
+  esac
+  # Fallback feedback; the summariser agent replaces it with a curated one (same verdict).
+  st phase=tested status=escalated "verdicts.tester=$verdict" "verdicts.tester_attempt=$attempt" \
+    "feedback.tester=$fb. Last lines of the log: $(tail -n 30 "$log")"
+  # One engine-visible output for every failure (when: can only compare one value); the verdict says which.
+  printf TEST_GATE_FAIL
   ;;
 check-tests)
   read -r lock lock_setup <<<"${5:-}"; res=${6:-}

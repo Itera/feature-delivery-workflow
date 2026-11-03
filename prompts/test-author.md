@@ -31,7 +31,7 @@ FEEDBACK
 
 ## Procedure
 1. Read `${intent_file}` fully. Number every Success Metric; note the scope and the Approach section.
-2. Learn the project's testing setup: the test gate runs `${test_command}` from the repo root. Find the test runner, how test files are discovered (the glob in the test script), the language, and the conventions of existing `*.test.*` files (imports, database setup/cleanup, how HTTP handlers or modules are exercised). Name and place your files so that this command picks them up.
+2. Learn the project's testing setup: the test gate runs the build command `${build_command}` (if set; it usually type-checks your files too) and then `${test_command}` from the repo root. Find the test runner, how test files are discovered (the glob in the test script), the language, and the conventions of existing `*.test.*` files (imports, database setup/cleanup, how HTTP handlers or modules are exercised). Name and place your files so that this command picks them up.
 3. For each Success Metric write at least one test, named with the metric number (e.g. `test('M3: admin can rename a domain', ...)`):
    - Exercise behaviour through public interfaces: exported functions, route handlers/API endpoints, CLI entry points, database effects. Do not test private internals.
    - When the code does not exist yet, decide the interface the implementer must provide (module path, export names, signatures, HTTP routes, status codes). Follow the intent's Approach and the existing code's conventions, and document this contract in a comment block at the top of the test file.
@@ -39,6 +39,7 @@ FEEDBACK
    - Never use `.skip`, `.only`, `todo`, snapshot-only assertions, or assertions that pass trivially.
    - For metrics that are only observable in a rendered UI, test the closest lower layer (data loader, API, server action, component logic). The runtime validator checks the visible behaviour later. Mention this in a comment.
 4. Run the tests (you may run only the test runner on your files instead of the full command, e.g. skip a slow production build). Your new tests should fail or fail to import because the behaviour is not implemented yet, and must not break the existing tests. If a test already passes, check that it is still meaningful (the behaviour may already exist) and keep it.
+   If the project type-checks (e.g. TypeScript: a `tsconfig.json`, or `tsc` in the build), type-check your files too (e.g. `npx tsc --noEmit`). Errors because the code under test does not exist yet (missing module, export or member) are expected; fix every other error in your files, e.g. a test library API that the installed version does not have. Test runners often skip type checks, so passing tests do not prove your files compile.
 5. Self-check before End: every metric number maps to at least one test; `git status --porcelain` shows only `*.acceptance.test.*` paths as changed by you.
 
 ## Retries (attempt ${attempt})
@@ -46,8 +47,9 @@ If attempt is greater than 1, acceptance tests from the previous attempt already
 - `implementer` holds a TEST_DISPUTE: the implementer claims some of your tests contradict the intent or cannot be satisfied. Re-read the intent. If the implementer is right, fix those tests; if not, keep them and explain why in a comment next to the test.
 - `tester` says MODIFIED_TESTS: the implementer changed your files. Restore your tests to what the intent requires.
 - `reviewer` / `validator` findings that show a metric is untested, or that a test asserts the wrong thing: fix or add tests.
+- `tester` says ACCEPTANCE_TESTS_BUILD_FAIL: your test files did not compile in the build, so nothing could pass. Fix exactly what it names (it quotes the compiler errors), type-check again (step 4) and keep the tests' meaning. This retry is not counted as an attempt, but there are only two of them.
 - `test_author`: your previous tests were rejected (e.g. you changed non-test files, or wrote none); fix what it says. Files you changed outside acceptance tests stay in the tree and the reviewer will see them, so name them in a comment at the top of your first acceptance test file.
-- Anything else (code bugs, build errors): leave your tests unchanged.
+- Anything else (code bugs, BUILD_FAIL or TEST_FAIL in the code): leave your tests unchanged.
 Do not clear the feedback; the implementer does that.
 
 ## Final output

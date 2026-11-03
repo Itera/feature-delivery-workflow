@@ -70,10 +70,15 @@ function getPath(obj, dotted) {
 const ROLES = {
   test_author: { phase: 'tests_written', ok: 'DONE', tokens: ['DONE', 'BLOCKED', 'INTENT_ISSUE'] },
   implementer: { phase: 'implemented', ok: 'DONE', tokens: ['DONE', 'TEST_DISPUTE', 'INTENT_ISSUE'] },
-  tester: { phase: 'tested', ok: 'GREEN', tokens: ['GREEN', 'BUILD_FAIL', 'TEST_FAIL'] },
+  tester: { phase: 'tested', ok: 'GREEN', tokens: ['GREEN', 'BUILD_FAIL', 'TEST_FAIL', 'ACCEPTANCE_TESTS_BUILD_FAIL'] },
   reviewer: { phase: 'reviewed', ok: 'CLEAR', tokens: ['CLEAR', 'P0', 'P1', 'INTENT_ISSUE'] },
   validator: { phase: 'validated', ok: 'PASS', tokens: ['PASS', 'FAIL', 'INTENT_ISSUE'] },
 };
+// Test gate failures are decided by the gate (intent-git.sh run-tests); the summariser only words the feedback and
+// must record the same token for that attempt.
+const GATE_FAILS = ['BUILD_FAIL', 'TEST_FAIL', 'ACCEPTANCE_TESTS_BUILD_FAIL'];
+// Attempts that count toward the cap: free retries for acceptance tests that did not build are not counted.
+const countedAttempts = (e) => (typeof e.attempts === 'number' ? e.attempts : 0) - (Number(e.test_fixes) || 0);
 // The intent itself is wrong (contradictory, impossible or unverifiable): retrying cannot fix it, so the
 // intent goes to a human (status needs_human; `next` skips it and its dependents).
 const INTENT_ISSUE = 'INTENT_ISSUE';
@@ -113,6 +118,10 @@ function main() {
     const state = readState();
     state.intents = state.intents || {};
     const entry = state.intents[id] || { phase: 'pending', status: 'pending', verdicts: {} };
+    const gate = (entry.verdicts || {}).tester;
+    if (role === 'tester' && GATE_FAILS.includes(gate) && (entry.verdicts || {}).tester_attempt === attempt && token !== gate) {
+      throw new Error(`the test gate recorded ${gate} for attempt ${attempt}; record that token, not ${token}`);
+    }
     setPath(entry, `verdicts.${role}`, token);
     setPath(entry, `verdicts.${role}_attempt`, attempt);
     setPath(entry, `feedback.${role}`, ok ? '' : fb);
@@ -230,7 +239,7 @@ function main() {
 
   if (cmd === 'next') {
     // Orchestrator selection: first intent (critical_path order) that is not completed,
-    // has all depends_on completed, and has attempts below the cap.
+    // has all depends_on completed, and has counted attempts below the cap (free retries excluded).
     const max = Number(process.env.MAX_ATTEMPTS || rest[0] || 3);
     const state = readState();
     const intents = state.intents || {};
@@ -252,7 +261,7 @@ function main() {
       }
       const unmet = (e.depends_on || []).filter((d) => !done(d));
       if (unmet.length) { waiting.push({ id: key, reason: `waiting on: ${unmet.join(', ')}` }); continue; }
-      if (attemptsOf(e) >= max) { waiting.push({ id: key, reason: `exhausted ${attemptsOf(e)}/${max} attempts` }); continue; }
+      if (countedAttempts(e) >= max) { waiting.push({ id: key, reason: `exhausted ${countedAttempts(e)}/${max} attempts` }); continue; }
       if (!e.intent_file) { waiting.push({ id: key, reason: 'missing intent_file' }); continue; }
       console.log(JSON.stringify({
         action: 'run',
