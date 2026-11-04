@@ -278,7 +278,7 @@ tasks:
         - gate-test
         - snapshot-before-review
     - id: run-tests
-      name: run-tests
+      name: build-and-run-tests
       # Deterministic test gate (replaces an LLM verdict): runs ${build_command} (if set) and ${test_command}, records
       # the verdict (GREEN|TEST_FAIL|BUILD_FAIL|ACCEPTANCE_TESTS_BUILD_FAIL) and prints GREEN|TEST_GATE_FAIL|NOT_RUN.
       # No when: on purpose. It prints NOT_RUN unless the implementer finished this attempt, and gate-test
