@@ -57,7 +57,7 @@
     "test_author": "sonnet", "implementer": "sonnet", "tester": "haiku",
     "reviewer": "opus", "validator": "sonnet", "reporter": "haiku", "pr_writer": "haiku", "explainer": "sonnet"
   },
-  "budget": { "max_attempts": 3, "max_test_fixes": 2, "run_timeout_min": 120, "pause_above_usd": 30 },
+  "budget": { "max_attempts": 3, "max_test_fixes": 2, "run_timeout_min": 180, "agent_timeout_min": 45, "pause_above_usd": 30 },
   "platform": { "os": "windows", "df_bin": "C:/Users/michal.matovcik/Work/LCA/.digital-factory/digital-factory.exe" },
   "dashboard": { "open_browser": true, "theme": "lemmings", "port": 4777 }
 }

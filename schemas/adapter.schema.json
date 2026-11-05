@@ -107,11 +107,12 @@
       "required": ["test_author", "implementer", "tester", "reviewer", "validator", "reporter", "pr_writer", "explainer"]
     },
     "budget": {
-      "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_test_fixes", "run_timeout_min"],
+      "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_test_fixes", "run_timeout_min", "agent_timeout_min"],
       "properties": {
         "max_attempts": { "type": "integer", "minimum": 1, "maximum": 5 },
         "max_test_fixes": { "type": "integer", "minimum": 0, "maximum": 3 },
         "run_timeout_min": { "type": "integer", "minimum": 10, "maximum": 480 },
+        "agent_timeout_min": { "type": "integer", "minimum": 5, "maximum": 120, "description": "Per agent task; the engine's own default is 5 minutes." },
         "pause_above_usd": { "type": "number" }
       }
     },

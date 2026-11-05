@@ -132,18 +132,42 @@ build_error_files() {
     | awk 'tolower($0) ~ /error/ && match($0, /[A-Za-z0-9_.@\/:+-]+\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|cs|csproj|py|go|rs|java|kt)/) { print substr($0, RSTART, RLENGTH) }' \
     | sed -e "s#^$root/##I" -e "s#^$PWD/##" -e 's#^\./##' | sort -u
 }
-setup_hash() {
-  local f list=""
+# The locked test setup as a manifest "<path> <blob|scripts-json>" per line. Blobs and the manifest are written to the
+# project's object store (-w), so the lock (the manifest's hash, carried in the task output) pins their content.
+setup_manifest() {
+  local f
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    list+="$f $(node -e 'let o={};try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scripts||{};for(const k of Object.keys(s).sort())if(/^((pre|post)?(test|build|lint)|typecheck)($|:)/.test(k))o[k]=s[k]}catch(e){o="unparsable"}process.stdout.write(JSON.stringify(o))' "$f")"$'\n'
+    printf '%s %s\n' "$f" "$(node -e 'let o={};try{const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).scripts||{};for(const k of Object.keys(s).sort())if(/^((pre|post)?(test|build|lint)|typecheck)($|:)/.test(k))o[k]=s[k]}catch(e){o="unparsable"}process.stdout.write(JSON.stringify(o))' "$f")"
   done < <(git ls-files -co --exclude-standard -- ':(glob)**/package.json' | sort -u)
   if [ ${#SETUP_CFG[@]} -gt 0 ]; then
     while IFS= read -r f; do
-      [ -f "$f" ] && list+="$f $(git hash-object --no-filters -- "$f")"$'\n'
+      [ -f "$f" ] && printf '%s %s\n' "$f" "$(git hash-object -w --no-filters -- "$f")"
     done < <(git ls-files -co --exclude-standard -- "${SETUP_CFG[@]}" | sort -u)
   fi
-  printf %s "$list" | git hash-object --stdin
+}
+setup_hash() { setup_manifest | git hash-object -w --stdin; }
+# Lines added to locked setup that could weaken or skip tests. A story may ADD to the setup (a project in the solution,
+# a package version, a project reference); it may not remove or change a line, nor add one of these.
+SETUP_DENY_RE='remove|exclude|skip|ignore|filter|condition|nowarn|warningsaserrors|istestproject|enabledefault|<compile|<none|acceptance|collect|blame|parallel|timeout'
+# setup_check <locked manifest hash>: prints violations (empty = unchanged or additions only); records additions.
+setup_check() {
+  local lock=$1 man now f h cur old d bad="" added=""
+  man=$(git cat-file -p "$lock" 2>/dev/null) || { echo "the lock manifest $lock is missing"; return; }
+  now=$(setup_manifest)
+  [ "$(printf '%s\n' "$man" | cut -d' ' -f1)" = "$(printf '%s\n' "$now" | cut -d' ' -f1)" ]     || bad+="locked setup files added or removed: $(diff <(printf '%s\n' "$man" | cut -d' ' -f1) <(printf '%s\n' "$now" | cut -d' ' -f1) | grep -E '^[<>]' | paste -sd ' ' -); "
+  while IFS=' ' read -r f h; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    case "$f" in package.json|*/package.json) [ "$(printf '%s\n' "$now" | grep -F "$f " | head -1)" = "$f $h" ] || bad+="$f: test/build/lint scripts changed; "; continue ;; esac
+    cur=$(git hash-object --no-filters -- "$f"); [ "$cur" = "$h" ] && continue
+    old="$RUN/tmp/setup-old"; git cat-file -p "$h" > "$old" || { bad+="$f: locked content missing; "; continue; }
+    d=$(git diff --no-index --no-color --unified=0 --ignore-cr-at-eol -- "$old" "$f" | grep -E '^[-+]' | grep -vE '^(---|\+\+\+) ')
+    printf '%s\n' "$d" | grep -qE '^-' && bad+="$f: lines removed or changed ($(printf '%s\n' "$d" | grep -E '^-' | head -3 | cut -c2- | tr -s ' ' | paste -sd '|' -)); "
+    printf '%s\n' "$d" | grep -E '^\+' | grep -qiE "$SETUP_DENY_RE" && bad+="$f: added a line that can weaken tests ($(printf '%s\n' "$d" | grep -E '^\+' | grep -iE "$SETUP_DENY_RE" | head -2 | cut -c2- | tr -s ' ' | paste -sd '|' -)); "
+    printf '%s\n' "$d" | grep -qE '^\+' && added+="$f: $(printf '%s\n' "$d" | grep -E '^\+' | cut -c2- | tr -s ' ' | paste -sd '|' -); "
+  done <<< "$man"
+  [ -n "$added" ] && st "setup_changes=$added"
+  printf %s "$bad"
 }
 # Factory or engine files in the project worktree: changed vs the story base, staged, or untracked (also ignored ones).
 # Prints them space-separated; empty = clean. (Replaces protected_changes: the loop's own files are not in the project.)
@@ -337,8 +361,9 @@ gate-test)
     st status=escalated phase=tested verdicts.tester=MODIFIED_TESTS "feedback.tester=The implementer changed, added, renamed or deleted acceptance test files after they were locked ($files). Make the tests pass by implementing the behaviour, or record TEST_DISPUTE. Test author: restore your tests."
     echo "CHECK=MODIFIED_TESTS" >&2; exit 1
   fi
-  if [ "$(setup_hash)" != "$lock_setup" ]; then
-    st status=escalated phase=tested verdicts.tester=MODIFIED_TEST_SETUP "feedback.tester=The implementer changed the locked test setup after the acceptance tests were locked (package.json test/build/lint scripts or: $(cfg tests.locked_also | paste -sd ' ' -)). Revert those changes; the tests must run unchanged."
+  sv=$(setup_check "$lock_setup")
+  if [ -n "$sv" ]; then
+    st status=escalated phase=tested verdicts.tester=MODIFIED_TEST_SETUP "feedback.tester=The implementer changed the locked test setup in a way that is not allowed: $sv Only additions are allowed in $(cfg tests.locked_also | paste -sd ' ' -) (a project in the solution, a package version, a project reference), never removing or changing a line, and never a line that can skip or weaken tests. Restore those lines."
     echo "CHECK=MODIFIED_TEST_SETUP" >&2; exit 1
   fi
   if [ "$res" != GREEN ] && [ "$(ts get "$task_id" verdicts.tester 2>/dev/null)" = GREEN ]; then

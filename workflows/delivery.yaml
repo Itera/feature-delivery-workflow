@@ -183,6 +183,7 @@ tasks:
     description: Write acceptance tests for the acceptance criteria of ${story_file}, following your prompt.
     type: standard
     agent: test-author
+    timeout: "{{budget.agent_timeout_min}}m"
     depends_on: [snapshot-before-tests]
   - id: lock-tests
     name: lock-tests
@@ -195,6 +196,7 @@ tasks:
     description: Implement every acceptance criterion of ${story_file} in ${repo_path} on branch ${branch}, following your prompt.
     type: standard
     agent: implementer
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.lock-tests.output?}"
     depends_on: [lock-tests]
   - id: run-tests
@@ -209,6 +211,7 @@ tasks:
     description: Summarise the failed test gate log into feedback.tester, following your prompt.
     type: standard
     agent: tester
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.run-tests.output?} == TEST_GATE_FAIL"
     depends_on: [run-tests]
   - id: gate-test
@@ -229,6 +232,7 @@ tasks:
     description: Review the diff of ${branch} against ${base_branch} for ${story_file}; write the verdict (CLEAR, P1 or P0) to verdicts.reviewer, then output exactly that token.
     type: standard
     agent: reviewer
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.gate-test.output?} == GREEN"
     depends_on: [gate-test, snapshot-before-review]
   - id: gate-review
@@ -257,6 +261,7 @@ tasks:
     description: Verify each acceptance criterion of ${story_file} is met in ${repo_path}; write the verdict (PASS or FAIL) to verdicts.validator, then output exactly that token.
     type: standard
     agent: validator
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.full-tests.output?} == GREEN"
     depends_on: [full-tests, snapshot-before-validate]
   - id: cleanup-after-validate
@@ -276,6 +281,7 @@ tasks:
     description: Write the pull request title, one-line summary and body for ${branch}, following your prompt.
     type: standard
     agent: pr-writer
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.gate-validate.output?} == PASS"
     depends_on: [gate-validate]
   - id: publish
@@ -290,6 +296,7 @@ tasks:
     description: Write the change-guide text for story ${task_id} (criteria -> changes -> tests), following your prompt.
     type: standard
     agent: explainer
+    timeout: "{{budget.agent_timeout_min}}m"
     when: "${tasks.gate-validate.output?} == PASS"
     depends_on: [publish]
   - id: guide
@@ -305,7 +312,10 @@ tasks:
     description: Report the outcome of story ${task_id} from the state file, following your prompt.
     type: standard
     agent: reporter
+    timeout: "{{budget.agent_timeout_min}}m"
     depends_on: [gate-test, gate-review, gate-validate, publish, guide]
+# Agent tasks carry their own timeout: the engine's default per task is 5 minutes, too short for a real build
+# (ANA-79 dry run 1: the test author and the implementer were killed at 5m0s, leaving half-edited project files).
 settings:
   max_concurrency: 1
   timeout: "{{budget.run_timeout_min}}m"
