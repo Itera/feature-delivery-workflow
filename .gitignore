@@ -10,3 +10,4 @@ runs/
 .claude/settings.local.json
 desktop.ini
 node_modules/
+local/
