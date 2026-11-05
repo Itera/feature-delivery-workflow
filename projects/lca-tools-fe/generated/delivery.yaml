@@ -21,7 +21,7 @@ metadata:
     - name: Review
       tasks: [snapshot-before-review, review, gate-review]
     - name: Validate
-      tasks: [snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
+      tasks: [full-tests, snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
     - name: Publish
       tasks: [write-pr, publish]
     - name: Report
@@ -222,20 +222,28 @@ tasks:
     parameters:
       command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} gate ${task_id} ${branch} ${base_branch} reviewer ${attempt} ${tasks.snapshot-before-review.output?}"
     depends_on: [review, snapshot-before-review]
-  - id: snapshot-before-validate
-    name: snapshot-before-validate
+  - id: full-tests
+    name: full-tests
+    # Slow suites, once the fast gate and the review passed (spec 2.4: staged by cost). Prints GREEN or TEST_GATE_FAIL.
     type: command
     when: "${tasks.gate-review.output?} == CLEAR"
     parameters:
-      command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} snapshot ${task_id} ${branch} ${base_branch}"
+      command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} full-tests ${task_id} ${branch} ${base_branch} ${attempt}"
     depends_on: [gate-review]
+  - id: snapshot-before-validate
+    name: snapshot-before-validate
+    type: command
+    when: "${tasks.full-tests.output?} == GREEN"
+    parameters:
+      command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} snapshot ${task_id} ${branch} ${base_branch}"
+    depends_on: [full-tests]
   - id: validate
     name: validate
     description: Verify each acceptance criterion of ${story_file} is met in ${repo_path}; write the verdict (PASS or FAIL) to verdicts.validator, then output exactly that token.
     type: standard
     agent: validator
-    when: "${tasks.gate-review.output?} == CLEAR"
-    depends_on: [gate-review, snapshot-before-validate]
+    when: "${tasks.full-tests.output?} == GREEN"
+    depends_on: [full-tests, snapshot-before-validate]
   - id: cleanup-after-validate
     name: cleanup-after-validate
     type: command

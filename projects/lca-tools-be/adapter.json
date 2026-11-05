@@ -30,7 +30,8 @@
   "companions": [{ "project": "lca-tools-docs", "when": "story-produces-docs" }],
   "commands": {
     "build": "dotnet build LCATools.slnx -c Release",
-    "test": "dotnet test LCATools.slnx -c Release --no-build"
+    "test": "dotnet test LCA.UnitTests/LCA.UnitTests.csproj -c Release --no-build",
+    "test_full": "dotnet test LCATools.slnx -c Release --no-build"
   },
   "tests": {
     "runner": "dotnet-test",

@@ -344,6 +344,18 @@ gate-test)
   [ "$(git branch --show-current)" = "$branch" ] && [ "$res" = GREEN ] && printf GREEN
   exit 0
   ;;
+full-tests)
+  attempt=${1:-}
+  fcmd=$(cfg commands.test_full)
+  [ -n "$fcmd" ] || { echo "full-tests: none configured" >&2; printf GREEN; exit 0; }
+  [ "$(git branch --show-current)" = "$branch" ] || { echo "full-tests: not on $branch" >&2; exit 1; }
+  st phase=full_testing status=in_progress
+  log=$RUN/logs/full-tests-$attempt.log
+  { echo "\$ $fcmd"; bash -c "$fcmd" </dev/null; } >"$log" 2>&1; rc=$?
+  if [ $rc -eq 0 ]; then st phase=full_tested status=in_progress; printf GREEN; exit 0; fi
+  st phase=full_tested status=escalated verdicts.tester=TEST_FAIL "verdicts.tester_attempt=$attempt"     "feedback.tester=The full test suite failed (exit $rc) after the fast gate passed; the story broke a slower test. Last lines of the log: $(tail -n 40 "$log")"
+  printf TEST_GATE_FAIL
+  ;;
 gate)
   role=${1:-}; attempt=${2:-}
   case "$role" in reviewer) pass=CLEAR ;; validator) pass=PASS ;; *) echo "gate: unknown role $role" >&2; exit 2 ;; esac
