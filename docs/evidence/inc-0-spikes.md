@@ -13,6 +13,13 @@ Total spike cost: about $0.24 (S5 on Sonnet was $0.21 of it, cold cache).
 | S5 advisor | **No advisor tool** on the DF Claude runtime. | s5 tool list | Spec fallback applies: an Opus skeleton or plan does the advisor's job up front (relevant from increment 5). |
 | S6 tool surface (new) | Agents inherit **all of the user's MCP servers** (17: Jira and Confluence write, Gmail, Slack, GitHub, Figma, …) and agent tools (`Agent`, `Skill`, `Workflow`, `PowerShell`). `allowed_tools` restricts built-in tools but **not** MCP tools (114 remained). `denied_tools: ["mcp__*"]` removes all MCP tools. | s6a and s6b init events | Every agent gets an explicit `allowed_tools` list **plus** `denied_tools: ["mcp__*"]`. Without the allowlist, `PowerShell` would bypass Bash deny patterns. A deterministic `tool-surface` check compares each agent's init tool list with what the role declares. [ADR-0002](../adr/0002-agent-tool-surface.md). |
 
+## Smoke run 1 (fixture S01, 2026-11-05): two defects, both fixed
+
+| # | What happened | Cause | Fix |
+|---|---|---|---|
+| S9 | The reviewer could not record its verdict; `gate-review` failed with no verdict | `allowed_tools` holding only `Bash(<pattern>)` entries makes DF turn the Bash tool **off**. The same was true for the tester, pr-writer and reporter | Read-only agents get `Bash` plus deny rules for every git write, `gh` and `rm`. The tamper guard (snapshot + gate) proves they changed nothing, as in Peter's design |
+| R1 | On the retry the test author was rejected (`MODIFIED_FILES src/app.js`) | It reverted the previous attempt's implementation (`git show HEAD:src/app.js > src/app.js`) to watch its tests fail | The guard was right. The prompt now says that tests may already pass on a retry, and forbids touching source files even temporarily |
+
 ## Other findings that change the plan
 
 - **Agent transcripts carry cost** (`model_usage…costUSD`, `total_cost_usd`), so increment 3's cost snapshot can read it from the run outputs, with no extra calls.

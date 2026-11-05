@@ -39,6 +39,7 @@ FEEDBACK
    - Never use `.skip`, `.only`, `todo`, snapshot-only assertions, or assertions that pass trivially.
    - For metrics that are only observable in a rendered UI, test the closest lower layer (data loader, API, server action, component logic). The runtime validator checks the visible behaviour later. Mention this in a comment.
 4. Run the tests (you may run only the test runner on your files instead of the full command, e.g. skip a slow production build). Your new tests should fail or fail to import because the behaviour is not implemented yet, and must not break the existing tests. If a test already passes, check that it is still meaningful (the behaviour may already exist) and keep it.
+   On attempt 2 or later the implementation may already exist, so your tests may pass straight away: that is expected and fine. **Never revert, stash, overwrite or move source files to watch a test fail, not even temporarily** (e.g. `git show HEAD:<file> > <file>`, `git checkout`, `git stash`): the workflow fingerprints every non-test file and rejects all your tests if one changed.
    If the project type-checks (e.g. TypeScript: a `tsconfig.json`, or `tsc` in the build), type-check your files too (e.g. `npx tsc --noEmit`). Errors because the code under test does not exist yet (missing module, export or member) are expected; fix every other error in your files, e.g. a test library API that the installed version does not have. Test runners often skip type checks, so passing tests do not prove your files compile.
 5. Self-check before End: every metric number maps to at least one test; `git status --porcelain` shows only acceptance test (`${accept_glob}`) paths as changed by you.
 
@@ -49,7 +50,7 @@ If attempt is greater than 1, acceptance tests from the previous attempt already
 - `reviewer` / `validator` findings that show a metric is untested, or that a test asserts the wrong thing: fix or add tests.
 - `tester` says ACCEPTANCE_TESTS_BUILD_FAIL: your test files did not compile in the build, so nothing could pass. Fix exactly what it names (it quotes the compiler errors), type-check again (step 4) and keep the tests' meaning. This retry is not counted as an attempt, but there are only two of them.
 - `test_author`: your previous tests were rejected (e.g. you changed non-test files, or wrote none); fix what it says. Files you changed outside acceptance tests stay in the tree and the reviewer will see them, so name them in a comment at the top of your first acceptance test file.
-- Anything else (code bugs, BUILD_FAIL or TEST_FAIL in the code): leave your tests unchanged.
+- Anything else (code bugs, BUILD_FAIL or TEST_FAIL in the code): leave your tests unchanged, run nothing that touches other files, and record DONE.
 Do not clear the feedback; the implementer does that.
 
 ## Final output
