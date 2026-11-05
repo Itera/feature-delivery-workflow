@@ -1,0 +1,45 @@
+name: spike-s6-toolset
+version: "0.1"
+description: >
+  S6: can a workflow limit an agent's tool set (user MCP servers leak into agents)? S3b: which bash does a command task get?
+variables:
+  repo_path: ""
+agents:
+  - id: allow-list
+    type: specialist
+    name: allow-list
+    runtime: claude
+    model: haiku
+    cwd: "${repo_path}"
+    prompt: "List the names of every tool you can call, one per line, nothing else."
+    permissions:
+      mode: bypassPermissions
+      allowed_tools: [Read, Glob, Grep, Write, Edit, Bash]
+  - id: deny-mcp
+    type: specialist
+    name: deny-mcp
+    runtime: claude
+    model: haiku
+    cwd: "${repo_path}"
+    prompt: "List the names of every tool you can call, one per line, nothing else."
+    permissions:
+      mode: bypassPermissions
+      denied_tools: ["mcp__*", "Agent", "Task", "Skill", "Workflow", "Artifact", "WebSearch", "WebFetch"]
+tasks:
+  - id: s3b-bash
+    name: s3b-bash
+    type: command
+    parameters:
+      command: "where bash & where sh & echo COMSPEC=%COMSPEC%"
+  - id: s6a-allow
+    name: s6a-allow
+    agent: allow-list
+    description: list tools
+  - id: s6b-deny
+    name: s6b-deny
+    agent: deny-mcp
+    description: list tools
+settings:
+  max_concurrency: 3
+  timeout: "10m"
+  failure_policy: continue-on-error
