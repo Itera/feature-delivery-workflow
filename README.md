@@ -1,70 +1,85 @@
-# SDLC Workflow (with loop orchestrator)
+# Feature delivery workflow (Itera delivery factory)
 
-The sdlc workflow and its loop orchestrator for the digital-factory engine: it takes intent files one by one and, for
-each, writes acceptance tests, implements, tests, reviews, validates and merges it into the base branch.
+Turns one approved story into a reviewed, draft pull request. Agents do the work; deterministic gates decide; a human merges.
+Built on the Digital Factory engine as a fork of `Itera/sdlc-workflow` (Peter's loop), following
+[Feature Delivery Workflow.md](Feature%20Delivery%20Workflow.md) (the spec) and the build plan in [docs/PLAN.md](docs/PLAN.md).
 
-```
-planning/intents/*.md + .task-state/state.json        (written by the intent-planner skill)
-  └─ .intent-loop/tick-loop.sh                         ticks until LOOP: STOP
-       └─ .intent-loop/scripts/orchestrate-tick.sh     one tick = one intent
-            └─ digital-factory workflow run .intent-loop/sdlc.yaml
-                 branch -> write tests -> lock -> implement -> test gate -> review -> validate -> merge
-```
+The factory runs **outside** the project it works on: nothing of it is committed to the project. Only the project's ignored
+`.itera/` folder is used locally ([ADR-0001](docs/adr/0001-run-from-outside-the-project.md)).
 
-## Files
+## Status (2026-11-05)
 
-| File | What it is |
-|---|---|
-| `tick-loop.sh` | Runs the loop: ticks until `LOOP: STOP` (the command you run) |
-| `sdlc.yaml` | The workflow: agents, models, tasks and their gates; `metadata.stages` groups the tasks for the workflow dashboard |
-| `prompts/` | Prompts of the agents: test-author, implementer, tester, reviewer, validator, reporter (found next to the workflow) |
-| `scripts/orchestrate-tick.sh` | One tick: picks the next intent, runs the workflow on it, judges the result, prints `LOOP: CONTINUE` or `LOOP: STOP (<reason>)` |
-| `scripts/intent-git.sh` | The git steps (branch, snapshot, gates, merge, park) and the tamper guards, run from the committed base branch |
-| `scripts/task-state.js` | Reads and writes `.task-state/state.json` |
-| `scripts/intent-guard-ignore` | Paths the reviewer/validator may change while running the app |
-| `package.json` | Marks the scripts as CommonJS, whatever the project uses |
-| `skills/intent-orchestrator/` | Agent skill that runs one tick (`/intent-orchestrator`; in Claude Code also under `/loop`) |
-
-## Using it in a project
-
-The loop runs its scripts from the commit on the base branch, so it lives inside each project, committed
-there, **in a folder named `.intent-loop/`** (its scripts and the agents refer to `.intent-loop/scripts/…`).
-In the project (a git repo on `main` whose test command already passes):
-
-1. Put this repo's files in `.intent-loop/` (download the zip from GitHub, or clone it and delete its `.git`).
-2. Set `test_command` in `.intent-loop/sdlc.yaml` to the project's test command (default `npm test`), and
-   `build_command` to its build with a type check (e.g. `npm run build`; empty = no build check).
-3. Optionally copy `.intent-loop/skills/intent-orchestrator/` to `.claude/skills/` (or your agent's skills folder).
-4. Add `.task-state/`, `.digital-factory/`, `.digital-factory-outputs/`, `.copilot-cache/` and `.code-compass/` to `.gitignore`.
-5. Commit on `main`, and set `git config user.name` / `user.email` in the project (the loop commits).
-6. Run `.intent-loop/tick-loop.sh` (all intents) or `.intent-loop/scripts/orchestrate-tick.sh` (one).
-
-To update the loop later, replace `.intent-loop/` with the newer version the same way and set `test_command`
-and `build_command` again.
-
-## The test gate
-
-After the implementer, the gate runs `build_command` (if set) and then `test_command`, always both, into
-`.task-state/test-<intent>.log`, and records one verdict (`verdicts.tester`):
-
-| Verdict | When | Who fixes it on the next attempt |
+| Increment | Branch | State |
 |---|---|---|
-| `GREEN` | build and tests pass | — |
-| `TEST_FAIL` | the build passes, tests fail | implementer |
-| `BUILD_FAIL` | the build fails in the app code (also when test files fail too, or a test imports something the code does not provide) | implementer |
-| `ACCEPTANCE_TESTS_BUILD_FAIL` | the build fails only in `*.acceptance.test.*` files | test author; the attempt is not counted (at most `MAX_TEST_FIXES`, default 2, then the intent needs a human) |
+| 0 · Fork and run | `inc/0-fork-and-run` | **In progress.** Runs end to end on the smoke fixture (one attempt: tests → review → full tests → validate → PR text → dry publish). |
+| 1 · Typed control plane | `inc/1-control-plane` | Not started |
+| 2 · Quality bar | `inc/2-quality-bar` | Not started |
+| 3 · Measure + setup skill | `inc/3-measure` | Not started |
 
-In the workflow the step's output is `GREEN` or `TEST_GATE_FAIL`; the verdict says which failure. The
-`build`/`typecheck` scripts in package.json are locked with the test scripts, so the implementer cannot weaken
-them.
+Each increment gets its own worktree (`worktrees/inc-N`, gitignored), branched from the previous one, and ends with a tag
+`inc-N-done` plus `docs/evidence/inc-N*.md`. Compare states with `git diff inc-0-done inc-1-done`.
 
-`BROWSER_CHECK=0` skips the Chromium check for projects without a UI; `DF_BIN` points to the engine if it is
-not on the PATH, in `~/.digital-factory` or in a `.digital-factory` folder above the project.
+## Continue here: what is missing in increment 0
 
-Everything in `.intent-loop/` and `.claude/skills/intent-orchestrator/` is protected: a run that changes it is
-rejected. Change the loop here and update projects again.
+| # | Item | What done looks like | Where |
+|---|---|---|---|
+| 1 | **Board log naming + one shared board** | The driver writes `board/delivery@<YYYYMMDD-HHMMSS>.log` (the name the dashboard's runs mode expects) and reuses one board server on a fixed port that switches to the current run, so the Lemmings theme stays on. Stops board servers of finished runs. | `scripts/factory-run.sh` §2b |
+| 2 | **Platform independence** | Adapter `platform` block (`os`, `df_bin`, `open_cmd`) with per-OS defaults; platform code isolated: process cleanup (`taskkill` / `kill`), path conversion (`cygpath` on Windows only), opening the board (`explorer.exe` / `open` / `xdg-open`), run timeout (`timeout` / `gtimeout` / watchdog). Windows stays the default. | schema, `story-git.sh` `kill_recorded`, `factory-run.sh` |
+| 3 | **Change guide** (`explain` step after publish) | Local interactive HTML: acceptance criteria → changes → tests, gate and review results. The agent writes only text (JSON); a script builds every code link from the real diff (`vscode://file/…:line` + permalink `blob/<sha>/<path>#L<a>-L<b>`). Written to `.itera/guide/<id>.html` and `runs/`; never committed or linked from the PR (C8). | new `prompts/explainer.md`, `scripts/guide.mjs`, workflow task |
+| 4 | **Smoke run after 1–3** | Fixture story publishes in one attempt; board follows it; guide opens with working links. | `evals/fixture-node/make.sh`, then `factory-run.sh fixture-node S01` |
+| 5 | **Pilot baseline (dry)** | Both pilot stories (backend .NET, frontend Angular) reach `publish` in dry mode; PR text and guide written locally, nothing pushed. The orchestrating session snapshots each tracker issue and passes it with `--id <KEY> --spec <file>`. Pilot specifics: `local/` (not in git). | `factory-run.sh <project> <story> --id … --spec … --publish dry` |
+| 6 | **Close increment 0** | `docs/evidence/inc-0.md` (metrics only: attempts, verdicts, timings, cost, lessons), tag `inc-0-done`, push. | |
 
-The intent files are guarded too, also when they are kept out of git (e.g. listed in `.git/info/exclude`): before
-each run the tick hashes the intents folder and copies it to `.task-state/plan-before/`. If an intent file changed
-during the run, merge refuses and the tick marks the intent `needs_human` (`PLAN_CHANGED`) and stops the loop;
-`diff -r .task-state/plan-before <intents folder>` shows what changed.
+Then increments 1–3 as in [docs/PLAN.md](docs/PLAN.md) §4, and the pilot's real draft PRs after `inc-3-done` (§5).
+
+### Decided and already built
+- Trusted gates: every command task is `git show <trust>:scripts/launch.sh | sh -s -- …` (quote-free through cmd.exe; the script and the project config come from the factory commit, not from disk).
+- Every agent declares its tool surface: no MCP tools, no `PowerShell`, no sub-agents ([ADR-0002](docs/adr/0002-agent-tool-surface.md)).
+- Staged tests: fast suite (incl. locked acceptance tests) every attempt; full suite once after review is CLEAR (`full-tests` gate).
+- Story base per story (`git.story_base`), draft PR to that base, assignees from the adapter, no reviewers.
+- Hidden disclosure: the CLI's attribution footer is stripped (and logged); anything else naming the tooling blocks publishing. PR text is checked before anything is committed.
+- `isolation_violations()`: `.itera/` must stay ignored and uncommitted; any other factory path anywhere fails the run.
+- Tracker issue as story input (`--id`, `--spec`): the issue wins on outcome / acceptance criteria / scope; the task file adds the how. No tracker writes.
+
+### Open questions (spec §4.7 and found while building)
+- Code Compass for agents: blocked by the `mcp__*` deny; decide in increment 3 (deterministic code-intel step vs. a narrow allow).
+- A stacked story base moves (its PR is rebased or merged) → today `BASE_MOVED` stops publish; decide the rebase policy.
+- Retries re-run the test author every attempt; spec §2.5 wants it skipped while the lock is valid (increment 1).
+
+## How to run
+
+```bash
+# once per project: render the template with the project's adapter (commit the result; the driver refuses drift)
+node scripts/render.mjs <project>
+
+# smoke test on the fixture (fresh fixture each time)
+bash evals/fixture-node/make.sh
+bash scripts/factory-run.sh fixture-node S01 --publish dry
+
+# a real story (dry first; --publish draft-pr opens the PR)
+bash scripts/factory-run.sh <project> <story> --id <KEY> --spec <tracker-snapshot.md> --publish dry
+```
+
+Requirements: Git for Windows (Git Bash), Node 22+, the `digital-factory` engine (`DF_BIN`, default under the pilot folder), `gh`
+logged in with the project's account. Run records land in `runs/` (gitignored); the board opens automatically.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `workflows/delivery.yaml` | Workflow template (Peter's sdlc, ported) |
+| `prompts/` | Agent prompts: test-author, implementer, tester, reviewer, validator, pr-writer, reporter |
+| `scripts/launch.sh`, `scripts/story-git.sh` | Trusted launcher and all gates (port of `intent-git.sh`) |
+| `scripts/render.mjs` | Template + adapter + overrides → `projects/<p>/generated/`; fixed-rule and drift checks |
+| `scripts/factory-run.sh` | Driver: worktree per round, run copy per attempt, judge, park, board |
+| `scripts/task-state.js` | State store (`--state <file>`) |
+| `schemas/adapter.schema.json` | Adapter schema (setup only, no project IP) |
+| `projects/<p>/` | `adapter.json` + rendered `generated/` |
+| `evals/fixture-node/` | Smoke-test fixture and its story |
+| `dashboard/` | Peter's workflow-dashboard (vendored) |
+| `docs/` | Plan, ADRs, evidence |
+| `local/`, `runs/`, `worktrees/` | Gitignored: pilot specifics, run records, increment worktrees |
+
+## Rules for this repo
+- No project IP or secrets: tech stack and setup only (PLAN C7). Run records and pilot details stay in `runs/` and `local/`.
+- Push directly to this repo while the workflow is being set up; increments stay on their own branches.
