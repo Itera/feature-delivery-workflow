@@ -16,8 +16,8 @@
     "story_base": "LCA-3300-itera-local-folder",
     "local_dir": ".itera",
     "commit": {
-      "subject": "LCA-3300: {local_id} {summary}",
-      "subject_must_match": "^LCA-[0-9]+:[[:space:]]*[^[:space:]]",
+      "subject": "{local_id}: {summary}",
+      "subject_must_match": "^(LCA|ANA)-[0-9]+:[[:space:]]*[^[:space:]]",
       "author_name": "Michal Matovcik",
       "author_email": "michal@lca.no"
     }

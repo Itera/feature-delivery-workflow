@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # factory-run.sh: run one story through the delivery workflow, attempt by attempt, from outside the project (ADR-0001).
-#   scripts/factory-run.sh <project> <story> [--round N] [--base <branch>] [--publish dry|draft-pr]
-#     <story>  task-file id as in the backlog folder, e.g. F01 (file F01-*.md); local id = adapter prefix + id (PA-F01)
+#   scripts/factory-run.sh <project> <story> [--id KEY] [--spec <file>] [--round N] [--base <branch>] [--publish dry|draft-pr]
+#     <story>  task-file id as in the backlog folder (file <story>-*.md); local id = adapter prefix + story, or --id (a tracker key)
+#     --spec   a tracker snapshot (Markdown) taken by the orchestrating session; it is authoritative for the outcome, acceptance
+#              criteria and scope, and the task file adds the how. Both are combined into the run's story file and hashed.
 # What it does (Peter's orchestrate-tick.sh, re-homed):
 #   1. trust = this factory commit; refuses a dirty template or a generated folder that drifts from a fresh render
 #   2. project worktree <worktree_root>/<branch> from origin/<base> (created once per round; reused by retries)
@@ -17,9 +19,10 @@ say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { say "STOP: $*"; exit 1; }
 
 project=${1:-}; story=${2:-}; shift 2 2>/dev/null || die "usage: factory-run.sh <project> <story> [--round N] [--base B] [--publish dry|draft-pr]"
-round=1; base=""; publish=dry
+round=1; base=""; publish=dry; id=""; spec=""
 while [ $# -gt 0 ]; do case "$1" in
   --round) round=$2; shift 2 ;; --base) base=$2; shift 2 ;; --publish) publish=$2; shift 2 ;;
+  --id) id=$2; shift 2 ;; --spec) spec=$2; shift 2 ;;
   *) die "unknown option $1" ;; esac; done
 case "$publish" in dry|draft-pr) ;; *) die "--publish dry|draft-pr" ;; esac
 A="$F/projects/$project/adapter.json"; [ -f "$A" ] || die "no adapter for $project"
@@ -37,7 +40,8 @@ mkdir -p "$F/runs/.cli" && git -C "$F" show "$trust:scripts/task-state.js" > "$F
 # 2 · story and branch
 dir=$(cfg backlog.dir); sf=$(ls "$dir"/"$story"-*.md 2>/dev/null | head -1); [ -n "$sf" ] || die "no task file $story-*.md in $dir"
 sf=$(cygpath -m "$sf" 2>/dev/null || echo "$sf")
-local_id="$(cfg backlog.local_id_prefix)$story"
+local_id=${id:-"$(cfg backlog.local_id_prefix)$story"}
+[ -z "$spec" ] || [ -f "$spec" ] || die "no spec snapshot at $spec"
 slug=$(basename "$sf" .md); slug=${slug#"$story"-}
 base=${base:-$(cfg git.story_base)}
 branch=$(cfg git.branch_pattern); branch=${branch//\{local_id\}/$local_id}; branch=${branch//\{slug\}/$slug}; branch=${branch//\{round\}/$round}
@@ -46,6 +50,21 @@ docs_dir=$(cd "$(dirname "$sf")" && git rev-parse --show-toplevel 2>/dev/null); 
 run="$FW/runs/$project/$local_id/r$round"
 for p in "$FW" "$sf" "$wt" "$run" "$docs_dir"; do case "$p" in *" "*) die "path with a space (not allowed, spike S7): $p" ;; esac; done
 mkdir -p "$run/logs" "$run/scratch"
+# Story input: the tracker snapshot (authoritative what) + the task file (how), combined once per round, then hashed each attempt.
+if [ -n "$spec" ]; then
+  { printf '# %s (tracker issue: authoritative for outcome, acceptance criteria and out of scope)
+
+' "$local_id"; cat "$spec"
+    printf '
+
+---
+
+# How (task file %s; its relative links resolve from %s; where it disagrees with the issue above, the issue wins)
+
+' "$(basename "$sf")" "$(dirname "$sf")"
+    cat "$sf"; } > "$run/story.md"
+  sf="$run/story.md"
+fi
 
 if [ ! -d "$wt" ]; then
   git -C "$repo" fetch -q origin "$base" || die "cannot fetch origin/$base"

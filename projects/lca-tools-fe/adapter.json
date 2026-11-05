@@ -14,8 +14,8 @@
     "branch_pattern": "{local_id}-{slug}-r{round}",
     "worktree_root": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-fe-worktrees",
     "commit": {
-      "subject": "LCA-3300: {local_id} {summary}",
-      "subject_must_match": "^LCA-[0-9]+:[[:space:]]*[^[:space:]]",
+      "subject": "{local_id}: {summary}",
+      "subject_must_match": "^(LCA|ANA)-[0-9]+:[[:space:]]*[^[:space:]]",
       "author_name": "Michal Matovcik",
       "author_email": "michal@lca.no"
     }
