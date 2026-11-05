@@ -1,0 +1,61 @@
+{
+  "$schema": "../../schemas/adapter.schema.json",
+  "template_version": "0.0.0-inc0",
+  "project": { "id": "lca-tools-be", "stack": ["dotnet10", "aspnetcore", "xunit", "moq"] },
+  "repo": {
+    "path": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-be",
+    "remote": "origin",
+    "github": "LCATools/lca-tools-be"
+  },
+  "git": {
+    "base_branch": "develop",
+    "story_base": "LCA-3300-itera-local-folder",
+    "local_dir": ".itera",
+    "branch_pattern": "{local_id}-{slug}-r{round}",
+    "worktree_root": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-be-worktrees",
+    "commit": {
+      "subject": "{local_id}: {summary}",
+      "subject_must_match": "^(LCA|ANA)-[0-9]+:[[:space:]]*[^[:space:]]",
+      "author_name": "Michal Matovcik",
+      "author_email": "michal@lca.no"
+    }
+  },
+  "backlog": {
+    "source": "task-files",
+    "dir": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-docs/docs/features/product-analysis/tasks",
+    "local_id_prefix": "PA-",
+    "criteria_heading": "Acceptance criteria"
+  },
+  "tracker": null,
+  "companions": [{ "project": "lca-tools-docs", "when": "story-produces-docs" }],
+  "commands": {
+    "build": "dotnet build LCATools.slnx -c Release",
+    "test": "dotnet test LCA.UnitTests/LCA.UnitTests.csproj -c Release --no-build",
+    "test_full": "dotnet test LCATools.slnx -c Release --no-build"
+  },
+  "tests": {
+    "runner": "dotnet-test",
+    "acceptance_glob": "LCA.UnitTests/**/*AcceptanceTests.cs",
+    "acceptance_regex": "AcceptanceTests\\.cs",
+    "acceptance_hint": "<Thing>AcceptanceTests.cs in the LCA.UnitTests folder that mirrors the production project (e.g. LCA.UnitTests/Shared/<Area>/)",
+    "locked_also": ["Directory.Build.props", "Directory.Packages.props", "LCATools.slnx", "LCA.UnitTests/LCA.UnitTests.csproj", ":(glob)**/*.runsettings", ".editorconfig"],
+    "contract_errors": "CS0246|CS0234|CS1061|CS0117|CS0103|CS1729|CS7036|CS0535"
+  },
+  "publish": {
+    "mode": "draft-pr",
+    "gh_account": "michal-matovcik-lca",
+    "assignees": ["michal-matovcik-lca"],
+    "reviewers": [],
+    "never_push": ["develop", "staging", "pre-staging", "master", "main"],
+    "pr_max_words": 250,
+    "pr_sections_extra": ["human-security-review-flag", "review-checklist"]
+  },
+  "disclosure": { "mode": "hidden" },
+  "merge": { "mode": "human" },
+  "models": {
+    "test_author": "sonnet", "implementer": "sonnet", "tester": "haiku",
+    "reviewer": "opus", "validator": "sonnet", "reporter": "haiku", "pr_writer": "haiku"
+  },
+  "budget": { "max_attempts": 3, "max_test_fixes": 2, "run_timeout_min": 120, "pause_above_usd": 30 },
+  "dashboard": { "open_browser": true, "theme": "lemmings", "port": 4777 }
+}

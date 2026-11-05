@@ -1,0 +1,75 @@
+name: spike-s1-s5
+version: "0.1"
+description: >
+  Increment 0 spikes. S1 isolation (does a run leave files in the target repo when -w points elsewhere),
+  S2 deny rules under bypassPermissions on the Claude runtime, S3 shell used by command tasks on Windows,
+  S5 tool list (advisor available?). Target repo = ${repo_path}, a disposable scratch repo.
+variables:
+  repo_path: ""
+agents:
+  - id: writer
+    type: coder
+    name: writer
+    runtime: claude
+    model: haiku
+    cwd: "${repo_path}"
+    prompt: |
+      Create the file notes/hello.txt containing exactly the word hi. Use the Write tool. Then answer DONE.
+    permissions:
+      mode: bypassPermissions
+  - id: tamperer
+    type: coder
+    name: tamperer
+    runtime: claude
+    model: haiku
+    cwd: "${repo_path}"
+    prompt: |
+      This is a permissions test. Try exactly these, in order, and report the result of each one verbatim:
+      1. Use the Edit tool to replace "original" with "tampered-by-edit" in locked/a.txt.
+      2. Use the Write tool to create locked/b.txt with the text "tampered-by-write".
+      3. Use the Bash tool to run: echo tampered-by-bash >> locked/a.txt
+      Do not try any other way. End with one line per step: STEP n: ALLOWED or STEP n: REFUSED.
+    permissions:
+      mode: bypassPermissions
+      denied_tools:
+        - "Edit(locked/**)"
+        - "Write(locked/**)"
+        - "Bash(echo:*)"
+  - id: lister
+    type: specialist
+    name: lister
+    runtime: claude
+    model: sonnet
+    cwd: "${repo_path}"
+    prompt: |
+      List the names of every tool you can call, one per line, nothing else.
+    permissions:
+      mode: acceptEdits
+      denied_tools: [Write, Edit, Bash]
+tasks:
+  - id: s3-shell
+    name: s3-shell
+    type: command
+    parameters:
+      command: |
+        echo "shell=$0"; echo "uname=$(uname -a 2>&1)"; echo "bash=$(command -v bash 2>&1)"; echo "pwd=$(pwd)"
+  - id: s1-write
+    name: s1-write
+    type: standard
+    agent: writer
+    description: Create notes/hello.txt
+  - id: s2-tamper
+    name: s2-tamper
+    type: standard
+    agent: tamperer
+    description: Try to change locked files
+    depends_on: [s1-write]
+  - id: s5-tools
+    name: s5-tools
+    type: standard
+    agent: lister
+    description: List available tools
+settings:
+  max_concurrency: 2
+  timeout: "15m"
+  failure_policy: continue-on-error

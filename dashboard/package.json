@@ -1,0 +1,9 @@
+{
+  "name": "workflow-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only live dashboard for digital-factory workflow runs (pipelines, intent loop)",
+  "bin": { "workflow-dashboard": "server.js" },
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

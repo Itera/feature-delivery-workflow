@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workflow hub</title>
+<style>
+  :root {
+    --bg: #0f1218; --panel: #171b23; --line: #2a303c; --text: #d7dde8; --dim: #8892a4;
+    --pending: #3a4150; --running: #3b82f6; --ok: #22c55e; --failed: #ef4444;
+  }
+  body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .meta { color: var(--dim); flex: 1; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  main { padding: 16px 20px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 26px; }
+  th { text-align: left; font-weight: 500; color: var(--dim); font-size: 11px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.wf { cursor: pointer; }
+  tr.wf:hover td { background: var(--panel); }
+  .name { font-weight: 600; }
+  .sub { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--pending); color: #fff; white-space: nowrap; }
+  .pill.RUNNING { background: var(--running); }
+  .pill.COMPLETED { background: var(--ok); color: #05210f; }
+  .pill.FAILED { background: var(--failed); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block; margin-right: 5px; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .warn { color: #f59e0b; }
+  .open { color: var(--running); white-space: nowrap; }
+  .empty { color: var(--dim); padding: 10px 0 26px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Workflow hub</h1>
+  <span class="meta" id="meta"></span>
+  <button id="rescan" title="Look for new .digital-factory/events folders now">Rescan</button>
+</header>
+<main>
+  <h2>Running</h2>
+  <div id="running"></div>
+  <h2>Recent</h2>
+  <div id="recent"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dur = (s) => (s == null ? '' : s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+  : s >= 60 ? `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s` : `${Math.round(s)}s`);
+const ago = (t, now) => {
+  if (!t) return '';
+  const s = Math.max(0, (now - t) / 1000);
+  return s >= 2 * 86400 ? `${Math.floor(s / 86400)} days ago` : `${dur(s)} ago`;
+};
+let data = null;
+const short = (p) => (p && data && p.startsWith(data.home) ? '~' + p.slice(data.home.length) : p || '');
+
+function rows(list, live) {
+  if (!list.length) return `<div class="empty">${live ? 'No workflow is running.' : 'No runs found.'}</div>`;
+  const head = live ? '<th>Status</th><th>Workflow</th><th>Started</th><th>Live output</th><th></th>'
+    : '<th>Last run</th><th>Workflow</th><th>When</th><th>Runs</th><th></th>';
+  return `<table><tr>${head}</tr>${list.map((w) => {
+    const name = `<div class="name">${esc(w.name)}${w.loop ? ' <span class="sub">(intent loop)</span>' : ''}</div><div class="sub">${esc(short(w.yaml))}</div>`;
+    const open = `<span class="open">${w.dashboard ? 'dashboard open ↗' : 'open ↗'}</span>`;
+    if (live) {
+      const r = w.running[0];
+      // Runs from /workflow-execute and /workflow-live-cli have no process or log here: they come from the engine database.
+      const out = r.source ? `<span class="sub">engine database (${esc(r.source)})</span>`
+        : r.log ? `<span class="sub">${esc(short(r.log))}</span>` : '<span class="warn">terminal only: no live progress</span>';
+      return `<tr class="wf" data-id="${w.id}"><td><span class="pill RUNNING"><span class="dot"></span>RUNNING</span>${w.running.length > 1 ? ` ×${w.running.length}` : ''}</td>
+        <td>${name}</td><td>${ago(r.start, data.now)}<div class="sub">${dur((data.now - r.start) / 1000)} running${r.pid ? ` · pid ${r.pid}` : ''}</div></td><td>${out}</td><td>${open}</td></tr>`;
+    }
+    const l = w.last;
+    const counts = l?.tasks != null ? ` · ${l.ok}/${l.tasks} tasks ok` : l?.jobs != null ? ` · ${l.jobs} jobs` : '';
+    return `<tr class="wf" data-id="${w.id}"><td>${l ? `<span class="pill ${l.status}">${l.status}</span>` : '<span class="pill">—</span>'}</td>
+      <td>${name}</td><td>${l ? `${ago(l.at, data.now)}<div class="sub">${dur(l.duration)}${counts}${l.source ? ` · ${esc(l.source)}` : ''}</div>` : ''}</td>
+      <td>${w.runs || ''}</td><td>${open}</td></tr>`;
+  }).join('')}</table>`;
+}
+function render() {
+  $('meta').textContent = `running workflows anywhere · recent runs under ${short(data.root)}`;
+  const live = data.workflows.filter((w) => w.running.length);
+  $('running').innerHTML = rows(live, true);
+  $('recent').innerHTML = rows(data.workflows.filter((w) => !w.running.length && w.exists), false);
+}
+async function refresh() {
+  try { data = await (await fetch('api/list')).json(); render(); } catch (_) { $('meta').textContent = 'hub not reachable'; }
+}
+document.addEventListener('click', (e) => {
+  const tr = e.target.closest('tr.wf');
+  if (tr) window.open(`w/${tr.dataset.id}/`, `wf-${tr.dataset.id}`);
+});
+$('rescan').onclick = async () => { await fetch('api/rescan', { method: 'POST' }); refresh(); };
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

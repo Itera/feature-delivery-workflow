@@ -1,0 +1,28 @@
+name: spike-s7-cmd-quoting
+version: "0.1"
+description: >
+  S7: can a DF command task on Windows (cmd.exe) run Git Bash with an inline script that fetches a script from a trusted
+  commit (git show) and passes an upstream task output containing spaces? Variants: single-quoted -c, double-quoted -c.
+variables:
+  factory: ""
+  bash: 'C:\Program Files\Git\usr\bin\bash.exe'
+tasks:
+  - id: producer
+    name: producer
+    type: command
+    parameters:
+      command: "echo tree123 head456 trust789"
+  - id: a-single
+    name: a-single
+    type: command
+    depends_on: [producer]
+    parameters:
+      command: >-
+        sh -c 'set -- ${tasks.producer.output?}; t=$(git -C "${factory}" rev-parse HEAD); s=$(git -C "${factory}" show "$t":scripts/task-state.js | head -c 20); echo "A n=$# 3=$3 t=$t s=$s pct=%PATH:~0,3% amp=1&2"'
+  - id: b-double
+    name: b-double
+    type: command
+    depends_on: [producer]
+    parameters:
+      command: >-
+        C:\PROGRA~1\Git\usr\bin\bash.exe -c 'set -- ${tasks.producer.output?}; t=$(git -C "${factory}" rev-parse HEAD); echo "B n=$# 3=$3 t=$t bash=$BASH"'

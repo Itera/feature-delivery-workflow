@@ -1,0 +1,288 @@
+# Delivery workflow TEMPLATE (increment 0). Rendered per project by scripts/render.mjs into
+# projects/<project>/generated/delivery.yaml; never run or edit the rendered copy by hand.
+#   double-brace GATE <cmd> [args]  -> the trusted, quote-free launcher line (ADR-0001, spike S7)
+#   double-brace <adapter.path>     -> a value from projects/<project>/adapter.json
+# Derived from Peter's sdlc.yaml: same verdict tokens, guards and test gate; Claude runtime with declared tool
+# surfaces (ADR-0002); runs outside the project (ADR-0001); merge -> publish (draft PR, human merge).
+name: delivery
+version: "0.0.0-inc0"
+description: "One attempt at one story: preflight -> branch -> acceptance tests (locked) -> implement -> test gate -> review -> validate -> PR text -> publish -> report."
+metadata:
+  stages:
+    - name: Setup
+      tasks: [preflight, branch, snapshot-before-tests]
+    - name: Acceptance tests
+      tasks: [write-tests, lock-tests]
+    - name: Implement
+      tasks: [implement]
+    - name: Test gate
+      tasks: [run-tests, summarise-test-failure, gate-test]
+    - name: Review
+      tasks: [snapshot-before-review, review, gate-review]
+    - name: Validate
+      tasks: [full-tests, snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
+    - name: Publish
+      tasks: [write-pr, publish]
+    - name: Report
+      tasks: [report]
+variables:
+  # Set by the driver (scripts/factory-run.sh) for every run. Paths must not contain spaces (cmd.exe, spike S7).
+  factory: ""
+  trust: ""
+  project: "{{project.id}}"
+  run_dir: ""
+  repo_path: ""
+  task_id: ""
+  local_id: ""
+  branch: ""
+  base_branch: "{{git.story_base}}"
+  attempt: "1"
+  git_meta: "-"
+  story_file: ""
+  story_hash: ""
+  docs_dir: ""
+  preflight: run
+  publish_mode: dry
+  # For prompts only (the gates read the trusted config, not these).
+  state_cli: ""
+  scratch_dir: ""
+  accept_glob: "{{tests.acceptance_glob}}"
+  accept_hint: "{{tests.acceptance_hint}}"
+  build_command: "{{commands.build}}"
+  test_command: "{{commands.test}}"
+  pr_max_words: "{{publish.pr_max_words}}"
+  pr_extras: "{{publish.pr_sections_extra}}"
+agents:
+  - id: test-author
+    type: tester
+    name: test-author
+    runtime: claude
+    model: "{{models.test_author}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}", "${scratch_dir}"]
+    prompt: '@file:prompts/test-author.md'
+    permissions:
+      mode: bypassPermissions
+      allowed_tools: [Read, Glob, Grep, Write, Edit, Bash]
+      denied_tools: ["mcp__*", PowerShell, Agent, Task, Skill, Workflow, WebFetch, WebSearch, "Edit(${docs_dir}/**)", "Write(${docs_dir}/**)"]
+  - id: tester
+    type: tester
+    name: tester
+    runtime: claude
+    model: "{{models.tester}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${run_dir}"]
+    prompt: '@file:prompts/tester.md'
+    permissions:
+      mode: acceptEdits
+      # Spike S9: an allow list of Bash(pattern) entries turns Bash off entirely, so read-only agents get Bash and
+      # deny rules; the tamper guard (snapshot + gate) is what proves they changed nothing.
+      allowed_tools: [Read, Grep, Glob, Bash]
+      denied_tools: ["mcp__*", PowerShell, Write, Edit, Agent, Task, Skill, Workflow, "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)", "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(git add:*)", "Bash(rm:*)", "Bash(gh:*)"]
+  - id: implementer
+    type: coder
+    name: implementer
+    runtime: claude
+    model: "{{models.implementer}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}", "${scratch_dir}"]
+    prompt: '@file:prompts/implementer.md'
+    permissions:
+      mode: bypassPermissions
+      allowed_tools: [Read, Glob, Grep, Write, Edit, Bash]
+      denied_tools: ["mcp__*", PowerShell, Agent, Task, Skill, Workflow, WebFetch, WebSearch,
+                     "Edit({{tests.acceptance_glob}})", "Write({{tests.acceptance_glob}})",
+                     "Edit(${docs_dir}/**)", "Write(${docs_dir}/**)",
+                     "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)",
+                     "Bash(git reset:*)", "Bash(git rebase:*)", "Bash(git merge:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(gh:*)"]
+  - id: reviewer
+    type: reviewer
+    name: reviewer
+    runtime: claude
+    model: "{{models.reviewer}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}"]
+    prompt: '@file:prompts/reviewer.md'
+    permissions:
+      mode: acceptEdits
+      allowed_tools: [Read, Grep, Glob, Bash]
+      denied_tools: ["mcp__*", PowerShell, Write, Edit, Agent, Task, Skill, Workflow, "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)", "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(git add:*)", "Bash(rm:*)", "Bash(gh:*)"]
+  - id: validator
+    type: tester
+    name: validator
+    runtime: claude
+    model: "{{models.validator}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}", "${scratch_dir}"]
+    prompt: '@file:prompts/validator.md'
+    permissions:
+      # Must build, run and probe; the control is snapshot-before-validate + gate-validate (tamper guard).
+      mode: bypassPermissions
+      allowed_tools: [Read, Glob, Grep, Write, Bash]
+      denied_tools: ["mcp__*", PowerShell, Edit, Agent, Task, Skill, Workflow, WebSearch,
+                     "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git reset:*)", "Bash(git stash:*)", "Bash(gh:*)"]
+  - id: pr-writer
+    type: specialist
+    name: pr-writer
+    runtime: claude
+    model: "{{models.pr_writer}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}"]
+    prompt: '@file:prompts/pr-writer.md'
+    permissions:
+      mode: acceptEdits
+      allowed_tools: [Read, Grep, Glob, Bash]
+      denied_tools: ["mcp__*", PowerShell, Write, Edit, Agent, Task, Skill, Workflow, "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)", "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(git add:*)", "Bash(rm:*)", "Bash(gh:*)"]
+  - id: reporter
+    type: specialist
+    name: reporter
+    runtime: claude
+    model: "{{models.reporter}}"
+    cwd: "${repo_path}"
+    prompt: '@file:prompts/reporter.md'
+    permissions:
+      mode: acceptEdits
+      allowed_tools: [Read, Bash]
+      denied_tools: ["mcp__*", PowerShell, Write, Edit, Agent, Task, Skill, Workflow, "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)", "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(git add:*)", "Bash(rm:*)", "Bash(gh:*)"]
+tasks:
+  - id: preflight
+    name: preflight
+    # NEW: build + tests on the untouched story base. A red base stops the run without counting an attempt.
+    type: command
+    parameters:
+      command: "{{GATE preflight ${preflight}}}"
+  - id: branch
+    name: branch
+    type: command
+    when: "${tasks.preflight.output?} == GREEN"
+    parameters:
+      command: "{{GATE branch}}"
+    depends_on: [preflight]
+  - id: snapshot-before-tests
+    name: snapshot-before-tests
+    type: command
+    parameters:
+      command: "{{GATE snapshot test_author}}"
+    depends_on: [branch]
+  - id: write-tests
+    name: write-tests
+    description: Write acceptance tests for the acceptance criteria of ${story_file}, following your prompt.
+    type: standard
+    agent: test-author
+    depends_on: [snapshot-before-tests]
+  - id: lock-tests
+    name: lock-tests
+    type: command
+    parameters:
+      command: "{{GATE lock-tests ${attempt} ${tasks.snapshot-before-tests.output?}}}"
+    depends_on: [write-tests, snapshot-before-tests]
+  - id: implement
+    name: implement
+    description: Implement every acceptance criterion of ${story_file} in ${repo_path} on branch ${branch}, following your prompt.
+    type: standard
+    agent: implementer
+    when: "${tasks.lock-tests.output?}"
+    depends_on: [lock-tests]
+  - id: run-tests
+    name: build-and-run-tests
+    # No when: on purpose (Peter): it prints NOT_RUN unless the implementer finished this attempt.
+    type: command
+    parameters:
+      command: "{{GATE run-tests ${attempt}}}"
+    depends_on: [implement, lock-tests, snapshot-before-tests]
+  - id: summarise-test-failure
+    name: summarise-test-failure
+    description: Summarise the failed test gate log into feedback.tester, following your prompt.
+    type: standard
+    agent: tester
+    when: "${tasks.run-tests.output?} == TEST_GATE_FAIL"
+    depends_on: [run-tests]
+  - id: gate-test
+    name: gate-test
+    type: command
+    parameters:
+      command: "{{GATE gate-test ${tasks.run-tests.output?} ${tasks.lock-tests.output?}}}"
+    depends_on: [run-tests, summarise-test-failure, lock-tests, snapshot-before-tests]
+  - id: snapshot-before-review
+    name: snapshot-before-review
+    type: command
+    when: "${tasks.gate-test.output?} == GREEN"
+    parameters:
+      command: "{{GATE snapshot}}"
+    depends_on: [gate-test]
+  - id: review
+    name: review
+    description: Review the diff of ${branch} against ${base_branch} for ${story_file}; write the verdict (CLEAR, P1 or P0) to verdicts.reviewer, then output exactly that token.
+    type: standard
+    agent: reviewer
+    when: "${tasks.gate-test.output?} == GREEN"
+    depends_on: [gate-test, snapshot-before-review]
+  - id: gate-review
+    name: gate-review
+    type: command
+    parameters:
+      command: "{{GATE gate reviewer ${attempt} ${tasks.snapshot-before-review.output?}}}"
+    depends_on: [review, snapshot-before-review]
+  - id: full-tests
+    name: full-tests
+    # Slow suites, once the fast gate and the review passed (spec 2.4: staged by cost). Prints GREEN or TEST_GATE_FAIL.
+    type: command
+    when: "${tasks.gate-review.output?} == CLEAR"
+    parameters:
+      command: "{{GATE full-tests ${attempt}}}"
+    depends_on: [gate-review]
+  - id: snapshot-before-validate
+    name: snapshot-before-validate
+    type: command
+    when: "${tasks.full-tests.output?} == GREEN"
+    parameters:
+      command: "{{GATE snapshot}}"
+    depends_on: [full-tests]
+  - id: validate
+    name: validate
+    description: Verify each acceptance criterion of ${story_file} is met in ${repo_path}; write the verdict (PASS or FAIL) to verdicts.validator, then output exactly that token.
+    type: standard
+    agent: validator
+    when: "${tasks.full-tests.output?} == GREEN"
+    depends_on: [full-tests, snapshot-before-validate]
+  - id: cleanup-after-validate
+    name: cleanup-after-validate
+    type: command
+    parameters:
+      command: "{{GATE cleanup}}"
+    depends_on: [validate, snapshot-before-validate]
+  - id: gate-validate
+    name: gate-validate
+    type: command
+    parameters:
+      command: "{{GATE gate validator ${attempt} ${tasks.snapshot-before-validate.output?}}}"
+    depends_on: [validate, snapshot-before-validate, cleanup-after-validate]
+  - id: write-pr
+    name: write-pr
+    description: Write the pull request title, one-line summary and body for ${branch}, following your prompt.
+    type: standard
+    agent: pr-writer
+    when: "${tasks.gate-validate.output?} == PASS"
+    depends_on: [gate-validate]
+  - id: publish
+    name: publish
+    type: command
+    when: "${tasks.gate-validate.output?} == PASS"
+    parameters:
+      command: "{{GATE publish ${publish_mode} ${story_file} ${story_hash}}}"
+    depends_on: [write-pr, gate-validate]
+  - id: report
+    name: report
+    description: Report the outcome of story ${task_id} from the state file, following your prompt.
+    type: standard
+    agent: reporter
+    depends_on: [gate-test, gate-review, gate-validate, publish]
+settings:
+  max_concurrency: 1
+  timeout: "{{budget.run_timeout_min}}m"
+  # continue-on-error: a gate that exits 1 must not hide the report; the driver judges by the state file.
+  failure_policy: continue-on-error
+  cwd: "${repo_path}"
+  permissions:
+    mode: bypassPermissions
+    denied_tools: ["mcp__*", PowerShell, "Bash(rm -rf:*)", "Bash(sudo:*)"]

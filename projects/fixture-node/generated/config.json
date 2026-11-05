@@ -1,0 +1,52 @@
+{
+  "project": {
+    "id": "fixture-node",
+    "stack": [
+      "node24",
+      "node-test"
+    ]
+  },
+  "repo": {
+    "github": "local/fixture-node"
+  },
+  "git": {
+    "story_base": "main",
+    "local_dir": ".itera",
+    "commit": {
+      "subject": "FX-1: {local_id} {summary}",
+      "subject_must_match": "^FX-[0-9]+:[[:space:]]*[^[:space:]]",
+      "author_name": "Fixture Bot",
+      "author_email": "fixture@example.test"
+    }
+  },
+  "commands": {
+    "build": "npm run build",
+    "test": "npm test"
+  },
+  "tests": {
+    "runner": "node-test",
+    "acceptance_glob": "test/**/*.acceptance.test.js",
+    "acceptance_regex": "\\.acceptance\\.test\\.js",
+    "acceptance_hint": "test/<area>.acceptance.test.js using node:test and node:assert",
+    "locked_also": [
+      "package.json"
+    ],
+    "contract_errors": "Cannot find module|is not a function|is not defined"
+  },
+  "publish": {
+    "mode": "dry",
+    "gh_account": "none",
+    "assignees": [
+      "nobody"
+    ],
+    "reviewers": [],
+    "never_push": [
+      "main"
+    ],
+    "pr_max_words": 250,
+    "pr_sections_extra": []
+  },
+  "disclosure": {
+    "mode": "hidden"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "project": {
+    "id": "lca-tools-fe",
+    "stack": [
+      "angular19",
+      "typescript",
+      "karma",
+      "jasmine",
+      "eslint"
+    ]
+  },
+  "repo": {
+    "github": "LCATools/lca-tools-fe"
+  },
+  "git": {
+    "story_base": "LCA-3300-itera-local-folder",
+    "local_dir": ".itera",
+    "commit": {
+      "subject": "{local_id}: {summary}",
+      "subject_must_match": "^(LCA|ANA)-[0-9]+:[[:space:]]*[^[:space:]]",
+      "author_name": "Michal Matovcik",
+      "author_email": "michal@lca.no"
+    }
+  },
+  "commands": {
+    "install": "npm ci --no-audit --no-fund",
+    "build": "npm run build-dev",
+    "test": "npx ng test --watch=false --browsers=ChromeHeadless",
+    "lint": "npm run lint"
+  },
+  "tests": {
+    "runner": "karma",
+    "acceptance_glob": "src/**/*.acceptance.spec.ts",
+    "acceptance_regex": "\\.acceptance\\.spec\\.ts",
+    "acceptance_hint": "<name>.acceptance.spec.ts next to the code it tests",
+    "locked_also": [
+      "karma.conf.js",
+      "tsconfig.spec.json",
+      "angular.json",
+      "src/test.ts",
+      ".eslintrc.json"
+    ],
+    "contract_errors": "TS2305|TS2307|TS2339|TS2551|TS2614|TS2724|Cannot find module|has no exported member"
+  },
+  "publish": {
+    "mode": "draft-pr",
+    "gh_account": "michal-matovcik-lca",
+    "assignees": [
+      "michal-matovcik-lca"
+    ],
+    "reviewers": [],
+    "never_push": [
+      "develop",
+      "staging",
+      "pre-staging",
+      "master",
+      "main"
+    ],
+    "pr_max_words": 250,
+    "pr_sections_extra": [
+      "review-checklist"
+    ]
+  },
+  "disclosure": {
+    "mode": "hidden"
+  }
+}

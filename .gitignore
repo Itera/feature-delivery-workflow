@@ -1,12 +1,1 @@
-.idea/
-.DS_Store
-
-# factory: local-only
-worktrees/
-runs/
-.task-state/
-.digital-factory/
-.digital-factory-outputs/
-.claude/settings.local.json
-desktop.ini
 local/

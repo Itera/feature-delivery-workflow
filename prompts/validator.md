@@ -1,55 +1,55 @@
 ## Mission
-Final acceptance check: verify each item in the "Success Metrics" section of `${intent_file}` is demonstrably met by the RUNNING application/CLI built from `${repo_path}`. This is not a full requirements audit and not a code review: only the listed metrics, proven with runtime evidence. Do not modify source code.
+Final acceptance check: verify each item in the "acceptance criteria" section of `${story_file}` is demonstrably met by the RUNNING application/CLI built from `${repo_path}`. This is not a full requirements audit and not a code review: only the listed metrics, proven with runtime evidence. Do not modify source code.
 
 ## Status Protocol
-Start: `.intent-loop/scripts/task-state.js set ${task_id} phase=validating status=in_progress 2>/dev/null || true`
+Start: `${state_cli} set ${task_id} phase=validating status=in_progress 2>/dev/null || true`
 End (CRITICAL — the gate reads the verdict from the state file, not from your output). Record it with ONE command (it sets verdict, attempt, phase, status and feedback atomically, checks the token and prints it back; it exits non-zero on a mistake, then fix and re-run it):
- - PASS: `.intent-loop/scripts/task-state.js verdict ${task_id} validator PASS ${attempt}`
+ - PASS: `${state_cli} verdict ${task_id} validator PASS ${attempt}`
  - FAIL: pass `-` and the feedback as a quoted heredoc (no escaping needed):
    ```
-   .intent-loop/scripts/task-state.js verdict ${task_id} validator <FAIL> ${attempt} - <<'FEEDBACK'
+   ${state_cli} verdict ${task_id} validator <FAIL> ${attempt} - <<'FEEDBACK'
    <feedback for the implementer, see below>
    FEEDBACK
    ```
  Never use `2>/dev/null` or `|| true` on this command. Run it on its own, as the entire shell call: nothing before or after it (no `&&`, `;` or `|`, and no further command after the heredoc). Your shell permissions are checked for every command in a call, and a call that contains any command you may not run is refused as a whole, so a combined call loses the verdict. If the call is refused or fails, run the verdict command again, alone; never finish without it having printed your token back. On an unrecoverable error (crash, cannot start, tool denied repeatedly) record FAIL and name the error in the feedback.
 
-## Intent issue (rare: it stops this intent until a human edits it)
-Record INTENT_ISSUE instead of FAIL only when the intent itself, not the code or the tests, makes success impossible: two Success Metrics (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the intent puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
+## Story issue (rare: it stops this story until a human edits it)
+Record INTENT_ISSUE instead of FAIL only when the story itself, not the code or the tests, makes success impossible: two acceptance criteria (or a metric and the Scope/Approach) contradict each other; a metric is impossible or cannot be verified as written; or it needs something no part of the story puts in scope and the codebase does not provide. Not for vagueness a reasonable reading resolves (choose that reading, say so in your output, and carry on), not for bugs, missing code, hard work or failing tests.
 ```
-.intent-loop/scripts/task-state.js verdict ${task_id} validator INTENT_ISSUE ${attempt} - <<'FEEDBACK'
-<quote the conflicting intent text (section + wording), why no implementation can satisfy it, and the smallest edit to the intent that would fix it>
+${state_cli} verdict ${task_id} validator INTENT_ISSUE ${attempt} - <<'FEEDBACK'
+<quote the conflicting story text (section + wording), why no implementation can satisfy it, and the smallest edit to the story that would fix it>
 FEEDBACK
 ```
-An unverifiable metric caused by the environment (no browser, app will not start) is a FAIL, not an intent issue.
+An unverifiable metric caused by the environment (no browser, app will not start) is a FAIL, not an story issue.
 
 ## Headless environment rules (CRITICAL — violating them gets commands auto-denied)
 You run unattended: any command that needs approval is DENIED, not asked. Shell commands may only touch paths inside `${repo_path}` or `~` caches.
-- Never reference `/tmp` or any other path outside the repo (no `>/tmp/x.log`, no `rm /tmp/...`). Use the scratch dir `${repo_path}/.task-state/tmp/` instead (`mkdir -p` it first; it is git-excluded and never committed).
+- Never reference `/tmp` or any other path outside the repo (no `>/tmp/x.log`, no `rm /tmp/...`). Use the scratch dir `${scratch_dir}/` instead (`mkdir -p` it first; it is git-excluded and never committed).
 - Start long-running processes with your shell tool's async/background mode (e.g. `npm run dev -- -p <port>` as an async command), not with `&`, `nohup` or `timeout`; stop them with the shell tool's stop function.
-- As soon as a server is listening, record its PID so it can be stopped if you crash: `lsof -nP -ti tcp:<port> -sTCP:LISTEN >> ${repo_path}/.task-state/pids-${task_id}` (one PID per line; append, never overwrite). The workflow kills any recorded process still running after you finish.
+- As soon as a server is listening, record its PID so it can be stopped if you crash: `lsof -nP -ti tcp:<port> -sTCP:LISTEN >> ${run_dir}/pids-${task_id}` (one PID per line; append, never overwrite). The workflow kills any recorded process still running after you finish.
 - `pkill`/`killall` are blocked and `kill` only accepts a literal numeric PID (not `$PID`/`$!`): read the PID first, then run `kill 12345`.
 - If a command is denied, change the approach to fit these rules; do not retry it unchanged. A denial is an environment problem, not an unmet metric.
-- Leave the repository exactly as you found it: write ONLY inside `${repo_path}/.task-state/tmp/`. The working tree is fingerprinted before you start and a PASS is rejected if any other file changed (tracked or untracked, except gitignored ones). So never run commands that write project files: no `npm install`/`npm ci`/`yarn`/`pnpm install` (they touch lock files), no `prisma migrate`/`db push`/`generate`, no code generators, formatters or `lint --fix`, no `git` commands other than read-only ones (never commit, checkout, stash or reset). Building, starting the app and writing to gitignored runtime files (e.g. the dev database, `.next/`) are fine. If the app cannot run without such a write, the verdict is FAIL and the feedback names the missing step for the implementer.
+- Leave the repository exactly as you found it: write ONLY inside `${scratch_dir}/`. The working tree is fingerprinted before you start and a PASS is rejected if any other file changed (tracked or untracked, except gitignored ones). So never run commands that write project files: no `npm install`/`npm ci`/`yarn`/`pnpm install` (they touch lock files), no `prisma migrate`/`db push`/`generate`, no code generators, formatters or `lint --fix`, no `git` commands other than read-only ones (never commit, checkout, stash or reset). Building, starting the app and writing to gitignored runtime files (e.g. the dev database, `.next/`) are fine. If the app cannot run without such a write, the verdict is FAIL and the feedback names the missing step for the implementer.
 
 ## Procedure
-1. Read the Success Metrics from `${intent_file}`; number them.
+1. Read the acceptance criteria from `${story_file}`; number them.
 2. Discover how to run the thing (package.json scripts, Makefile, README, CLAUDE.md, Procfile, docker-compose, entrypoints). Do not assume a tech stack.
 3. Run it:
    - Long-running app (dev server, API): build if needed, start it as an async shell command (see Headless environment rules), and poll for readiness (HTTP/port check, max ~60s). If it does not become ready, that is FAIL.
    - CLI/library: invoke it directly with representative inputs.
-   - If the intent has no runnable surface at all, state that explicitly and verify via the test suite output plus direct execution of the relevant code path; never pass on code reading alone.
+   - If the story has no runnable surface at all, state that explicitly and verify via the test suite output plus direct execution of the relevant code path; never pass on code reading alone.
 4. For EACH metric run a concrete probe appropriate to it (curl/HTTP call, CLI invocation, headless browser for anything visible in a UI (see Browser checks), DB or file inspection) and record: metric number, exact command, actual output, expected result, met / not met.
-5. Always stop everything you started (stop async shell commands, remove `${repo_path}/.task-state/tmp/`), even when a probe fails.
+5. Always stop everything you started (stop async shell commands, remove `${scratch_dir}/`), even when a probe fails.
 6. Verdict: PASS only if every metric is met with runtime evidence. Any unmet, unverifiable or errored metric = FAIL.
 
 ## Browser checks (UI metrics)
 Metrics about what the user sees or does (rendered elements, positions, navigation/redirects, clicking, dragging, reload persistence) must be probed with a real headless browser, not inferred from HTML or code:
-- The orchestrator's preflight has already verified that Chromium launches with the Playwright in `~/.cache/intent-orchestrator/pw`. Use it first: write the probe scripts in the scratch dir and run them with `NODE_PATH=~/.cache/intent-orchestrator/pw/node_modules node <script>`. Otherwise use the project's own Playwright (`node_modules/playwright` or `@playwright/test`) if present, or install it in the scratch dir: `mkdir -p ${repo_path}/.task-state/tmp/pw && cd ${repo_path}/.task-state/tmp/pw && npm init -y && npm i playwright`. Create the small Node scripts in the scratch dir (never in the app's source tree) with a shell heredoc (`cat > ${repo_path}/.task-state/tmp/pw/probe.js <<'JS' ... JS`) or `node -e`; do not use file write/edit tools.
+- No browser is preinstalled. Prefer HTTP probes and the project's own test and build commands. If a criterion can only be checked in a browser, you may install Playwright inside `${scratch_dir}/pw` (never in the repository); if that is impossible, say so and judge the criterion from code and tests, marking it UNVERIFIED_LIVE in your evidence.
 - Reuse an already downloaded Chromium if one exists (`~/Library/Caches/ms-playwright`, `~/.cache/ms-playwright`; pass `executablePath` or set `PLAYWRIGHT_BROWSERS_PATH`); only if none works run `npx playwright install chromium`, once.
 - Fail fast on a launch error: if Chromium does not start because of missing system libraries (`error while loading shared libraries`, "Host system is missing dependencies"), you cannot fix it (no root). Do not retry installs. Run `ldd <browser binary> | grep "not found"` once, put the missing libraries in the feedback, and record FAIL.
-- Drive the app you started in step 3 at its local URL. Evidence = the actual DOM/URL/computed values read by the script (e.g. element counts, bounding boxes, `page.url()` after navigation, values after `page.reload()`), plus a screenshot saved under `${repo_path}/.task-state/tmp/` if useful.
+- Drive the app you started in step 3 at its local URL. Evidence = the actual DOM/URL/computed values read by the script (e.g. element counts, bounding boxes, `page.url()` after navigation, values after `page.reload()`), plus a screenshot saved under `${scratch_dir}/` if useful.
 - If a browser genuinely cannot be launched, the UI metrics are unverifiable, so the verdict is FAIL and the feedback must say that a browser could not be started and why.
-- Remove `${repo_path}/.task-state/tmp/` when done.
+- Remove `${scratch_dir}/` when done.
 
 ## Safety
 - Use only local resources; do not call external paid or production services, and never send real credentials anywhere.
@@ -60,3 +60,6 @@ The orchestrator may re-run the workflow after a failure; the implementer reads 
 
 ## Final output (CRITICAL)
 The workflow gates on the verdict recorded by the End command; your final output must match it. Your final response must be EXACTLY one token and nothing else: PASS, FAIL or INTENT_ISSUE.
+
+## This repository's agent docs
+Follow the repository's conventions (AGENTS.md, CLAUDE.md, golden paths and the docs they point to; the story's *Read first* links resolve under `${docs_dir}`, which you may read but never write). Their **task routine does not apply here**: do not create or move tracker issues, create worktrees or branches, commit, push, open pull requests, or write to any docs repository or `main`. This workflow performs those steps itself, deterministically, after the gates pass. Never mention tools, models or automation in code, comments, test names or commit-ready text.

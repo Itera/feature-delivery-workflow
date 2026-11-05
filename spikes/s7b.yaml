@@ -1,0 +1,18 @@
+name: spike-s7b
+version: "0.1"
+description: "S7b: quote-free trusted launcher: git show <trust>:script | sh -s -- args"
+variables:
+  factory: ""
+  trust: ""
+tasks:
+  - id: producer
+    name: producer
+    type: command
+    parameters:
+      command: "echo tree123 head456 trust789"
+  - id: piped
+    name: piped
+    type: command
+    depends_on: [producer]
+    parameters:
+      command: "git -C ${factory} show ${trust}:spikes/s7-probe.sh | sh -s -- gate T-1 ${tasks.producer.output?}"
