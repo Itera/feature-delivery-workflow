@@ -1,0 +1,46 @@
+{
+  "$schema": "../../schemas/adapter.schema.json",
+  "template_version": "0.0.0-inc0",
+  "project": { "id": "fixture-node", "stack": ["node24", "node-test"] },
+  "repo": { "path": "{factory}/runs/fixture/repo", "remote": "origin", "github": "local/fixture-node" },
+  "git": {
+    "base_branch": "main",
+    "story_base": "main",
+    "local_dir": ".itera",
+    "branch_pattern": "{local_id}-{slug}-r{round}",
+    "worktree_root": "{factory}/runs/fixture/worktrees",
+    "commit": {
+      "subject": "FX-1: {local_id} {summary}",
+      "subject_must_match": "^FX-[0-9]+:[[:space:]]*[^[:space:]]",
+      "author_name": "Fixture Bot",
+      "author_email": "fixture@example.test"
+    }
+  },
+  "backlog": { "source": "task-files", "dir": "{factory}/runs/fixture/docs/tasks", "local_id_prefix": "FX-", "criteria_heading": "Acceptance criteria" },
+  "tracker": null,
+  "commands": { "build": "npm run build", "test": "npm test" },
+  "tests": {
+    "runner": "node-test",
+    "acceptance_glob": "test/**/*.acceptance.test.js",
+    "acceptance_regex": "\\.acceptance\\.test\\.js",
+    "acceptance_hint": "test/<area>.acceptance.test.js using node:test and node:assert",
+    "locked_also": ["package.json"],
+    "contract_errors": "Cannot find module|is not a function|is not defined"
+  },
+  "publish": {
+    "mode": "dry",
+    "gh_account": "none",
+    "assignees": ["nobody"],
+    "reviewers": [],
+    "never_push": ["main"],
+    "pr_max_words": 250,
+    "pr_sections_extra": []
+  },
+  "disclosure": { "mode": "hidden" },
+  "merge": { "mode": "human" },
+  "models": {
+    "test_author": "sonnet", "implementer": "haiku", "tester": "haiku",
+    "reviewer": "sonnet", "validator": "haiku", "reporter": "haiku", "pr_writer": "haiku"
+  },
+  "budget": { "max_attempts": 2, "max_test_fixes": 1, "run_timeout_min": 30, "pause_above_usd": 5 }
+}

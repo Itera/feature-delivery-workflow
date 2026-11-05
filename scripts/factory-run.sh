@@ -23,7 +23,8 @@ while [ $# -gt 0 ]; do case "$1" in
   *) die "unknown option $1" ;; esac; done
 case "$publish" in dry|draft-pr) ;; *) die "--publish dry|draft-pr" ;; esac
 A="$F/projects/$project/adapter.json"; [ -f "$A" ] || die "no adapter for $project"
-cfg() { node -e 'const a=require(process.argv[1]);let v=a;for(const k of process.argv[2].split("."))v=v==null?v:v[k];process.stdout.write(v==null?"":String(v))' "$A" "$1"; }
+# {factory} in adapter values = this factory checkout (fixtures live under its runs/).
+cfg() { node -e 'const a=require(process.argv[1]);let v=a;for(const k of process.argv[2].split("."))v=v==null?v:v[k];process.stdout.write(v==null?"":String(v).split("{factory}").join(process.argv[3]))' "$A" "$1" "$FW"; }
 
 # 1 · trust: the factory commit everything is read from
 [ -z "$(git -C "$F" status --porcelain -- scripts workflows prompts schemas "projects/$project")" ] \

@@ -1,0 +1,4 @@
+node_modules/
+
+# Local tooling folder (never committed)
+.itera/
