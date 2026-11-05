@@ -9,7 +9,7 @@
   },
   "git": {
     "base_branch": "develop",
-    "story_base": "LCA-3300-itera-local-folder",
+    "story_base": "LCA-2405-agent-docs-pointers",
     "local_dir": ".itera",
     "branch_pattern": "{local_id}-{slug}-r{round}",
     "worktree_root": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-be-worktrees",

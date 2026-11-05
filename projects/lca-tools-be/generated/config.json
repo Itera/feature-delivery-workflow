@@ -12,7 +12,7 @@
     "github": "LCATools/lca-tools-be"
   },
   "git": {
-    "story_base": "LCA-3300-itera-local-folder",
+    "story_base": "LCA-2405-agent-docs-pointers",
     "local_dir": ".itera",
     "commit": {
       "subject": "{local_id}: {summary}",
