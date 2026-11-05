@@ -144,6 +144,7 @@ while :; do
       --set "state_cli=node $FW/runs/.cli/task-state.js --state $run/state.json" --set "scratch_dir=$wt/$ld/scratch" \
       delivery.yaml </dev/null >"$blog" 2>&1 ); rc=$?
   cp "$blog" "$a/df.log" 2>/dev/null
+  cp "$run/state.json" "$a/state-after.json" 2>/dev/null   # verdicts and feedback of this attempt (the next one resets them)
   say "[$local_id #$n] engine exit $rc"
   # after the run: hooks/config and the story file must be unchanged
   [ "$(L git-meta 2>/dev/null)" = "$meta" ] || { ts set "$local_id" status=needs_human "feedback.engine=GIT_META_CHANGED after the run" >/dev/null; outcome="NEEDS_HUMAN git hooks/config changed"; break; }
