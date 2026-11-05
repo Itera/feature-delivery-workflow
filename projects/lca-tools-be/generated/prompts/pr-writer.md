@@ -8,9 +8,14 @@ The reader is a human reviewer who will read it in about a minute. Give them wha
 now, why, the context they cannot see, and where to look closely. Do not restate the diff (which files, which tests were added,
 how something was implemented).
 
+## A rewrite
+If `${state_cli} get ${task_id} feedback.pr_writer` prints a reason, your earlier text broke a rule: start from it
+(`${state_cli} get ${task_id} pr`), fix exactly that, and store it again. Before storing, count the prose words yourself
+(pipe the prose through `wc -w` with a quoted heredoc).
+
 ## Rules (a gate checks them; a violation fails publishing)
 - **No mention of AI, models, agents, automation, tools, Claude, Anthropic, Copilot, Digital Factory or Code Compass**, anywhere. Write as the team.
-- Body: about 150 words of prose; hard limit ${pr_max_words} words, not counting the project's extra sections below.
+- Body: about 150 words of prose; hard limit ${pr_max_words} words. Not counted: the security-review flag line and the `## Review checklist` section (its own limit: 600 words, so keep each item to its short name and answer).
 - Fictional data only. No customer names, real ids, e-mail addresses or tokens. No secrets.
 - Plain words, short sentences, no marketing. No footer, signature or "generated with" line of any kind.
 
@@ -33,5 +38,5 @@ PR_JSON
   7. `## How it was verified`: one line (the project's CI shows the rest). Include the manual checks the story asks for that were NOT done, as unchecked boxes for the reviewer.
   8. The project's extra sections, in this order: `${pr_extras}`. Meanings:
      - `human-security-review-flag`: a first line of the body, above everything else: `**Human security review required:** <one-line reason from the story>`. Add it only when the story or its security notes ask for it.
-     - `review-checklist`: find the project's review checklist (search the repository and `${docs_dir}` for a file named `review-checklist.md`), copy its items as a list, and answer each one `yes`, `no` or `n/a`, with a short reason for every `no`.
+     - `review-checklist`: a section headed exactly `## Review checklist`, last in the body. Find the project's review checklist (search the repository and `${docs_dir}` for a file named `review-checklist.md`), copy its items as a list, and answer each one `yes`, `no` or `n/a`, with a short reason for every `no`.
 Then print exactly `PR=STORED`.

@@ -23,7 +23,7 @@ metadata:
     - name: Validate
       tasks: [full-tests, snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
     - name: Publish
-      tasks: [write-pr, publish]
+      tasks: [write-pr, check-pr, rewrite-pr, publish]
     - name: Explain
       tasks: [explain, guide]
     - name: Report
@@ -285,13 +285,28 @@ tasks:
     timeout: "10m"
     when: "${tasks.gate-validate.output?} == PASS"
     depends_on: [gate-validate]
+  - id: check-pr
+    name: check-pr
+    # The PR text rules (hidden disclosure, word limits) right after writing: a violation gets one rewrite, not a new attempt.
+    type: command
+    when: "${tasks.gate-validate.output?} == PASS"
+    parameters:
+      command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} pr-check ${task_id} ${branch} ${base_branch}"
+    depends_on: [write-pr]
+  - id: rewrite-pr
+    name: rewrite-pr
+    description: The PR text broke a rule (see feedback.pr_writer in the state file); rewrite it for ${branch}, following your prompt.
+    type: standard
+    agent: pr-writer
+    when: "${tasks.check-pr.output?} == REWRITE"
+    depends_on: [check-pr]
   - id: publish
     name: publish
     type: command
     when: "${tasks.gate-validate.output?} == PASS"
     parameters:
       command: "git -C ${factory} show ${trust}:scripts/launch.sh | sh -s -- ${factory} ${trust} ${git_meta} ${project} ${run_dir} ${repo_path} publish ${task_id} ${branch} ${base_branch} ${publish_mode} ${story_file} ${story_hash}"
-    depends_on: [write-pr, gate-validate]
+    depends_on: [write-pr, check-pr, rewrite-pr, gate-validate]
   - id: explain
     name: explain
     description: Write the change-guide text for story ${task_id} (criteria -> changes -> tests), following your prompt.

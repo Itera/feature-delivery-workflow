@@ -171,6 +171,24 @@ setup_check() {
   [ -n "$added" ] && st "setup_changes=$added"
   printf %s "$bad"
 }
+# pr_text_check <out_file>: the pr-writer's body with the CLI footer removed, written to <out_file>; prints
+# "<TOKEN> <reason>" on a violation (DISCLOSURE, PR_TOO_LONG, CHECKLIST_TOO_LONG, FAILED), nothing when it passes.
+# Words are counted per part: prose (everything before "## Review checklist", without the security-review flag line)
+# against publish.pr_max_words, the pasted checklist against publish.checklist_max_words (default 600).
+pr_text_check() {
+  local out=$1 raw="$RUN/tmp/pr-body.raw" n dis prose check max cmax
+  ts get "$task_id" pr.body > "$raw" 2>/dev/null || { echo "FAILED no PR body from the pr-writer"; return; }
+  # The agent CLI appends its own attribution footer by default: remove exactly those known lines, and record that it did.
+  grep -vE "$CLI_FOOTER_RE" "$raw" > "$out"
+  n=$(( $(wc -l < "$raw") - $(wc -l < "$out") )); [ "$n" -gt 0 ] && st "pr_footer_lines_removed=$n"
+  dis=$(grep -inE "$DISCLOSURE_RE" "$out" | head -3)
+  [ -z "$dis" ] || { echo "DISCLOSURE hidden mode, but the PR text contains: $(printf %s "$dis" | paste -sd ' ' -)"; return; }
+  prose=$(awk '/^## Review checklist[[:space:]]*$/{exit} !/^\*\*Human security review required:\*\*/' "$out" | wc -w)
+  check=$(awk 'c{print} /^## Review checklist[[:space:]]*$/{c=1}' "$out" | wc -w)
+  max=$(cfg publish.pr_max_words); cmax=$(cfg publish.checklist_max_words); cmax=${cmax:-600}
+  [ "$prose" -le "$max" ] || { echo "PR_TOO_LONG the PR prose has $prose words (limit $max; the security flag line and the '## Review checklist' section are not counted). Cut it to at most $max words."; return; }
+  [ "$check" -le "$cmax" ] || { echo "CHECKLIST_TOO_LONG the review checklist section has $check words (limit $cmax). Keep each item to its short name and answer, with a reason only for a 'no'."; return; }
+}
 # Factory or engine files in the project worktree: changed vs the story base, staged, or untracked (also ignored ones).
 # Prints them space-separated; empty = clean. (Replaces protected_changes: the loop's own files are not in the project.)
 # The one allowed local folder is $LOCAL_DIR (.itera/), which the project ignores (setup PR). It may exist untracked and
@@ -414,14 +432,8 @@ publish)
   iv=$(isolation_violations)
   [ -z "$iv" ] || fail publishing PUBLISH=ISOLATION "factory files in the project worktree: $iv"
   # PR text first, before anything is committed: a text problem must never leave a commit behind.
-  body="$RUN/pr-body.md"; ts get "$task_id" pr.body > "$RUN/tmp/pr-body.raw" 2>/dev/null || fail publishing PUBLISH=FAILED "no PR body from the pr-writer"
-  # The agent CLI appends its own attribution footer by default: remove exactly those known lines, and record that it did.
-  grep -vE "$CLI_FOOTER_RE" "$RUN/tmp/pr-body.raw" > "$body"
-  stripped=$(( $(wc -l < "$RUN/tmp/pr-body.raw") - $(wc -l < "$body") )); [ "$stripped" -gt 0 ] && st "pr_footer_lines_removed=$stripped"
-  dis=$(grep -inE "$DISCLOSURE_RE" "$body" | head -3)
-  [ -z "$dis" ] || fail publishing PUBLISH=DISCLOSURE "hidden mode, but the PR text contains: $(printf %s "$dis" | paste -sd ' ' -)"
-  words=$(wc -w < "$body"); max=$(cfg publish.pr_max_words)
-  [ "$words" -le $((max + 120)) ] || fail publishing PUBLISH=PR_TOO_LONG "PR body has $words words (limit $max + checklist)"
+  body="$RUN/pr-body.md"
+  pv=$(pr_text_check "$body"); [ -z "$pv" ] || fail publishing "PUBLISH=${pv%% *}" "${pv#* }"
   # Stage exactly the story's paths (never `add -A` blindly): everything git reports as changed or untracked.
   mapfile -t paths < <(git status --porcelain=v1 -z --untracked-files=all | tr '\0' '\n' | grep -E '^.. ' | cut -c4-)
   [ ${#paths[@]} -gt 0 ] && git add -- "${paths[@]}"
@@ -452,6 +464,12 @@ publish)
   url=$(gh pr create "${args[@]}" 2>&1 | tail -1) || fail publishing PUBLISH=FAILED "gh pr create: $url"
   st phase=published status=pr_open "commit=$(git rev-parse HEAD)" "pr=$url" published=pr
   echo "PUBLISH=PR $url"
+  ;;
+pr-check)
+  # Right after the pr-writer, before publish: a text problem gets one rewrite instead of costing a whole attempt.
+  # Prints OK or REWRITE (one token, for a when: ==); the violation goes to feedback.pr_writer for the rewrite.
+  pv=$(pr_text_check "$RUN/tmp/pr-body.checked")
+  if [ -z "$pv" ]; then st feedback.pr_writer=; printf OK; else st "feedback.pr_writer=${pv%% *}: ${pv#* }"; echo "PR_CHECK=$pv" >&2; printf REWRITE; fi
   ;;
 guide)
   # Local change guide after publish (PLAN C8): the explainer's text + links computed from the real diff, written to the

@@ -90,6 +90,7 @@
         "assignees": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "reviewers": { "type": "array", "items": { "type": "string" }, "maxItems": 0, "description": "Pilot: always empty (PLAN C3)" },
         "never_push": { "type": "array", "items": { "type": "string" } },
+        "checklist_max_words": { "type": "integer", "minimum": 50, "description": "Words of the pasted review checklist section; default 600." },
         "pr_max_words": { "type": "integer", "minimum": 50, "maximum": 400 },
         "pr_sections_extra": { "type": "array", "items": { "type": "string" }, "description": "Extension slot: project-required PR sections" }
       }
