@@ -64,6 +64,21 @@ L() { git -C "$F" show "$trust:scripts/launch.sh" | sh -s -- "$FW" "$trust" "${m
 ts() { node "$F/scripts/task-state.js" --state "$run/state.json" "$@"; }
 ts set "$local_id" "local_id=$local_id" "story_file=$sf" "branch=$branch" "base=$base" "round=$round" "trust=$trust" >/dev/null
 
+# 2b · live board: Peter's dashboard in runs mode on this round's attempt logs (spec 2.5). Theme is remembered per port.
+board="$run/board"; mkdir -p "$board"
+if [ "$(cfg dashboard.open_browser)" != false ]; then
+  port=$(cfg dashboard.port); port=${port:-4777}
+  if [ -f "$board/url" ] && curl -s -o /dev/null "$(cat "$board/url")api/snapshot"; then
+    say "board: $(cat "$board/url") (already running)"
+  else
+    while curl -s -o /dev/null "http://127.0.0.1:$port/"; do port=$((port + 1)); done
+    ( cd "$F/dashboard" && nohup node server.js --workflow "$F/projects/$project/generated/delivery.yaml" --runs "$board" --port "$port"         >"$board/server.log" 2>&1 & echo $! > "$board/server.pid" )
+    echo "http://localhost:$port/" > "$board/url"; sleep 2
+    say "board: http://localhost:$port/ (Lemmings: the button at top right, remembered for this port)"
+    cmd.exe //c start "" "http://localhost:$port/" >/dev/null 2>&1 || true
+  fi
+fi
+
 # 3 · attempts
 max=$(cfg budget.max_attempts); max_fix=$(cfg budget.max_test_fixes); tmo=$(cfg budget.run_timeout_min)
 n=$(ts get "$local_id" attempts 2>/dev/null || echo 0); fixes=$(ts get "$local_id" test_fixes 2>/dev/null || echo 0)
@@ -72,7 +87,7 @@ while :; do
   n=$((n + 1)); counted=$((n - fixes))
   [ "$counted" -le "$max" ] || { outcome="EXHAUSTED"; break; }
   ts set "$local_id" "attempts=$n" status=in_progress >/dev/null
-  a="$run/a$n"; rm -rf "$a"; mkdir -p "$a"
+  a="$run/a$n"; rm -rf "$a"; mkdir -p "$a" "$wt/$ld/scratch"
   cp -R "$F/projects/$project/generated/." "$a/"
   meta=""; meta=$(L git-meta 2>/dev/null) && [ -n "$meta" ] || die "cannot hash the project's git hooks/config"
   story_hash=$(git hash-object --no-filters -- "$sf")
@@ -85,7 +100,8 @@ while :; do
       --set "attempt=$n" --set "git_meta=$meta" --set "story_file=$sf" --set "story_hash=$story_hash" \
       --set "docs_dir=$docs_dir" --set "preflight=$pre" --set "publish_mode=$publish" \
       --set "state_cli=node $FW/runs/.cli/task-state.js --state $run/state.json" --set "scratch_dir=$wt/$ld/scratch" \
-      delivery.yaml </dev/null >"$a/df.log" 2>&1 ); rc=$?
+      delivery.yaml </dev/null >"$board/a$n.log" 2>&1 ); rc=$?
+  cp "$board/a$n.log" "$a/df.log" 2>/dev/null
   say "[$local_id #$n] engine exit $rc"
   # after the run: hooks/config and the story file must be unchanged
   [ "$(L git-meta 2>/dev/null)" = "$meta" ] || { ts set "$local_id" status=needs_human "feedback.engine=GIT_META_CHANGED after the run" >/dev/null; outcome="NEEDS_HUMAN git hooks/config changed"; break; }

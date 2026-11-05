@@ -52,6 +52,9 @@ mapfile -t SETUP_CFG < <(cfg tests.locked_also | sed 's#^\([^:]\)#:(glob)\1#')
 FACTORY_PATHS=(.digital-factory .digital-factory-outputs .task-state .factory .intent-loop .code-compass .copilot-cache)
 LOCAL_DIR=$(cfg git.local_dir); LOCAL_DIR=${LOCAL_DIR:-.itera}
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
+# Hidden disclosure: nothing visible to the project may name the tooling (PLAN C4).
+DISCLOSURE_RE='claude|anthropic|digital[ -]?factory|code[ -]?compass|co-authored-by|generated (with|by)|\bAI\b|\bLLM\b|copilot'
+CLI_FOOTER_RE='^[[:space:]]*(🤖[[:space:]]*)?Generated with \[?Claude Code|^[[:space:]]*Co-Authored-By:.*(Claude|[Aa]nthropic)'
 
 plan_hash() {
   local f=${1:-}
@@ -382,6 +385,15 @@ publish)
   fi
   iv=$(isolation_violations)
   [ -z "$iv" ] || fail publishing PUBLISH=ISOLATION "factory files in the project worktree: $iv"
+  # PR text first, before anything is committed: a text problem must never leave a commit behind.
+  body="$RUN/pr-body.md"; ts get "$task_id" pr.body > "$RUN/tmp/pr-body.raw" 2>/dev/null || fail publishing PUBLISH=FAILED "no PR body from the pr-writer"
+  # The agent CLI appends its own attribution footer by default: remove exactly those known lines, and record that it did.
+  grep -vE "$CLI_FOOTER_RE" "$RUN/tmp/pr-body.raw" > "$body"
+  stripped=$(( $(wc -l < "$RUN/tmp/pr-body.raw") - $(wc -l < "$body") )); [ "$stripped" -gt 0 ] && st "pr_footer_lines_removed=$stripped"
+  dis=$(grep -inE "$DISCLOSURE_RE" "$body" | head -3)
+  [ -z "$dis" ] || fail publishing PUBLISH=DISCLOSURE "hidden mode, but the PR text contains: $(printf %s "$dis" | paste -sd ' ' -)"
+  words=$(wc -w < "$body"); max=$(cfg publish.pr_max_words)
+  [ "$words" -le $((max + 120)) ] || fail publishing PUBLISH=PR_TOO_LONG "PR body has $words words (limit $max + checklist)"
   # Stage exactly the story's paths (never `add -A` blindly): everything git reports as changed or untracked.
   mapfile -t paths < <(git status --porcelain=v1 -z --untracked-files=all | tr '\0' '\n' | grep -E '^.. ' | cut -c4-)
   [ ${#paths[@]} -gt 0 ] && git add -- "${paths[@]}"
@@ -396,11 +408,8 @@ publish)
   fi
   [ "$(git rev-list --count "origin/$base..HEAD")" -gt 0 ] || fail publishing PUBLISH=FAILED nothing-to-publish
   iv=$(isolation_violations); [ -z "$iv" ] || fail publishing PUBLISH=ISOLATION "after commit: $iv"
-  body="$RUN/pr-body.md"; ts get "$task_id" pr.body > "$body" 2>/dev/null
-  dis=$( { cat "$body"; git log --format='%an <%ae>%n%B' "origin/$base..HEAD"; } | grep -inE 'claude|anthropic|digital[ -]?factory|code[ -]?compass|co-authored-by|generated (with|by)|\bAI\b|\bLLM\b|copilot' | head -3)
-  [ -z "$dis" ] || fail publishing PUBLISH=DISCLOSURE "hidden mode, but found: $(printf %s "$dis" | paste -sd ' ' -)"
-  words=$(wc -w < "$body"); max=$(cfg publish.pr_max_words)
-  [ "$words" -le $((max + 120)) ] || fail publishing PUBLISH=FAILED "PR body has $words words (limit $max + checklist)"
+  dis=$(git log --format='%an <%ae>%n%B' "origin/$base..HEAD" | grep -inE "$DISCLOSURE_RE" | head -3)
+  [ -z "$dis" ] || fail publishing PUBLISH=DISCLOSURE "hidden mode, but a commit contains: $(printf %s "$dis" | paste -sd ' ' -)"
   if [ "$mode" != draft-pr ]; then
     st phase=published status=pr_ready "commit=$(git rev-parse HEAD)" publish_mode=dry
     echo "PUBLISH=DRY commit=$(git rev-parse --short HEAD) body=$body"; exit 0

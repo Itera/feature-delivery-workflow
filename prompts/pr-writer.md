@@ -12,7 +12,7 @@ how something was implemented).
 - **No mention of AI, models, agents, automation, tools, Claude, Anthropic, Copilot, Digital Factory or Code Compass**, anywhere. Write as the team.
 - Body: about 150 words of prose; hard limit ${pr_max_words} words, not counting the project's extra sections below.
 - Fictional data only. No customer names, real ids, e-mail addresses or tokens. No secrets.
-- Plain words, short sentences, no marketing.
+- Plain words, short sentences, no marketing. No footer, signature or "generated with" line of any kind.
 
 ## Output: record it, then print PR=STORED
 Run exactly once, with a quoted heredoc holding one JSON object:

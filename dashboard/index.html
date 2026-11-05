@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workflow dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0f1218; --panel: #171b23; --line: #2a303c; --text: #d7dde8; --dim: #8892a4;
+    --pending: #3a4150; --running: #3b82f6; --ok: #22c55e; --failed: #ef4444; --skipped: #a3a3a3;
+    --notrun: #262b35; --stalled: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; gap: 16px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .meta { color: var(--dim); }
+  .themebtn { background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px; }
+  .themebtn:hover { color: var(--text); border-color: #4b5568; }
+  header select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: .02em; background: var(--pending); color: #fff; }
+  .pill.RUNNING, .pill.running, .pill.in_progress { background: var(--running); }
+  .pill.COMPLETED, .pill.ok, .pill.completed, .pill.GREEN, .pill.CLEAR, .pill.PASS, .pill.DONE { background: var(--ok); color: #05210f; }
+  .pill.FAILED, .pill.failed, .pill.escalated, .pill.TEST_FAIL, .pill.BUILD_FAIL, .pill.TEST_GATE_FAIL, .pill.P0, .pill.P1, .pill.FAIL, .pill.MODIFIED_FILES, .pill.MODIFIED_TESTS, .pill.MODIFIED_TEST_SETUP, .pill.MODIFIED_PROTECTED, .pill.GUARD_ERROR, .pill.NO_TESTS { background: var(--failed); }
+  .pill.STALLED, .pill.stalled, .pill.needs_human, .pill.INTENT_ISSUE, .pill.TEST_DISPUTE, .pill.ACCEPTANCE_TESTS_BUILD_FAIL, .pill.CANCELED, .pill.CANCELLED { background: var(--stalled); color: #2a1a00; }
+  .pill.skipped { background: var(--skipped); color: #222; }
+  .pill.not_run, .pill.pending { background: var(--pending); }
+  .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); display: inline-block; margin-right: 6px; }
+  .live-dot.on { background: var(--running); animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 0; height: calc(100vh - 50px); }
+  #left { overflow: auto; padding: 14px 16px; }
+  #right { border-left: 1px solid var(--line); overflow: auto; background: var(--panel); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 8px; font-weight: 600; }
+  section { margin-bottom: 18px; }
+  #stages { display: flex; gap: 4px; }
+  .stage { flex: 1; padding: 8px 10px; border-radius: 4px; background: var(--pending); color: #fff; font-weight: 600; font-size: 12px; position: relative; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stage small { display: block; font-weight: 400; opacity: .85; }
+  .stage.running { background: var(--running); animation: pulse 1.6s infinite; }
+  .stage.ok { background: var(--ok); color: #05210f; }
+  .stage.failed { background: var(--failed); }
+  .stage.skipped { background: #4a4f58; color: #cfd3da; }
+  .stage.not_run { background: var(--notrun); color: var(--dim); }
+  .stage.stalled { background: var(--stalled); color: #2a1a00; }
+  #graph-wrap { position: relative; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #12161d; }
+  #graph-sizer { position: relative; overflow: hidden; }
+  #graph { position: relative; transform-origin: 0 0; }
+  #graph svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .col-title { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .node { position: absolute; width: 168px; height: 70px; border-radius: 6px; padding: 6px 8px; cursor: pointer;
+          background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--pending); overflow: hidden; }
+  .node:hover { border-color: #4b5568; }
+  .node.sel { outline: 2px solid #93c5fd; }
+  #graph .node .gear { position: absolute; left: auto; top: 5px; right: 6px; width: 24px; height: 24px; color: var(--running); animation: spin 2.4s linear infinite; transform-origin: 50% 50%; }
+  #graph .node.subnode .gear { top: 4px; width: 20px; height: 20px; }
+  .node.running .id { padding-right: 26px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #graph .node .gear { animation: none; } }
+  .node.subnode { height: 52px; padding: 5px 8px; }
+  .node.subnode .id { font-weight: 500; font-size: 12px; }
+  .node.ghost { border-style: dashed; border-left-style: dashed; background: transparent; }
+  .node.ghost .id { color: var(--dim); }
+  .node .id { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .sub { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .foot { display: flex; align-items: center; gap: 4px; margin-top: 2px; min-height: 17px; }
+  .node .badges { margin-left: auto; display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+  .node.running { border-left-color: var(--running); box-shadow: 0 0 0 1px var(--running), 0 0 14px rgba(59,130,246,.45); }
+  .node.ok { border-left-color: var(--ok); }
+  .node.failed { border-left-color: var(--failed); background: #2a1719; }
+  .node.skipped { border-left-color: var(--skipped); opacity: .55; background: repeating-linear-gradient(135deg, #171b23 0 8px, #1c2029 8px 16px); }
+  .node.not_run { opacity: .4; }
+  .node.stalled { border-left-color: var(--stalled); }
+  .node .act { color: #93c5fd; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-family: ui-monospace, Menlo, monospace; }
+  .calls { font: 11px/1.4 ui-monospace, Menlo, monospace; color: #c9d1dd; word-break: break-all; }
+  .node .cond { color: #fbbf24; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #timeline-section { margin-bottom: 30px; }
+  #timeline-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 11px; }
+  #timeline-section > summary::-webkit-details-marker { display: none; }
+  #timeline-section > summary::before { content: '▶'; color: var(--dim); font-size: 13px; line-height: 1; transition: transform .15s; }
+  #timeline-section[open] > summary::before { transform: rotate(90deg); }
+  #timeline-section > summary h2 { display: inline; margin: 0; }
+  #timeline-section > summary:hover h2 { color: var(--text); }
+  #timeline-section[open] > summary { margin-bottom: 8px; }
+  #timeline { border: 1px solid var(--line); border-radius: 6px; background: #12161d; padding: 8px 10px; }
+  /* --sc: the row's stage colour (set per row from STAGE_COLORS) for its name and its finished bar */
+  .tl-row { display: grid; grid-template-columns: 220px 1fr 64px; gap: 8px; align-items: center; height: 20px; cursor: pointer; border-radius: 3px; }
+  .tl-row:hover .tl-name { filter: brightness(1.25); }
+  .tl-row.sel { background: #1c2433; }
+  .tl-row.sel .tl-name { font-weight: 600; }
+  .tl-row.sub { height: 14px; }
+  .tl-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--sc, #b8c0cc); font-size: 12px; }
+  .tl-row.sub .tl-name { padding-left: 14px; font-size: 10px; opacity: .7; }
+  .tl-track { position: relative; height: 100%; }
+  .tl-bar { position: absolute; top: 4px; bottom: 4px; min-width: 2px; border-radius: 2px; background: var(--pending); }
+  .tl-row.sub .tl-bar { top: 4px; bottom: 4px; opacity: .75; }
+  .tl-bar.ok { background: var(--sc, var(--ok)); } .tl-bar.failed { background: var(--failed); } .tl-bar.stalled { background: var(--stalled); }
+  .tl-bar.running { background: repeating-linear-gradient(45deg, var(--running) 0 6px, #2563eb 6px 12px); }
+  .tl-dur { text-align: right; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tl-axis { position: relative; height: 16px; margin-left: 228px; margin-right: 72px; color: var(--dim); font-size: 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  .tl-axis span { position: absolute; transform: translateX(-50%); }
+  .tl-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: #1f2530; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; font-size: 11px; }
+  tr.cur td { background: #1b2433; }
+  tr.click { cursor: pointer; }
+  td.eye { width: 1px; padding-right: 12px; cursor: pointer; color: #6b7585; vertical-align: middle; } td.eye svg { display: block; }
+  td.eye:hover { color: #c9d1dd; } td.eye.on { color: var(--running); }
+  tr.intent-text pre { max-height: none; font-size: 12px; }
+  tr.click:hover td { background: #1a1f29; }
+  .panel { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 3px 8px; }
+  .kv div:nth-child(odd) { color: var(--dim); }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9d1dd; background: #0d1015; padding: 8px; border-radius: 4px; max-height: 340px; overflow: auto; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+  .tabs button { background: transparent; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px; }
+  .tabs button.on { color: var(--text); border-color: #4b5568; background: #202634; }
+  .muted { color: var(--dim); }
+  #outlist td { padding: 3px 4px; font-size: 12px; }
+  #outlist td.f { word-break: break-all; }
+  #outlist tr.on td { background: #1b2433; }
+  #viewer h3 { font-size: 12px; margin: 10px 0 6px; display: flex; gap: 8px; }
+  #viewer h3 a { color: #93c5fd; font-weight: 400; margin-left: auto; }
+  #viewer pre { max-height: 60vh; }
+  .legend { display: flex; gap: 10px; color: var(--dim); font-size: 11px; margin-top: 6px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span id="live" class="live-dot"></span><span id="wfname">workflow</span></h1>
+  <span id="runinfo" class="meta">connecting…</span>
+  <span style="flex:1"></span>
+  <button id="themebtn" class="themebtn"></button>
+  <label class="meta">Run log <select id="logsel"><option value="">latest</option></select></label>
+</header>
+<main>
+  <div id="left">
+    <section>
+      <h2>Stages</h2>
+      <div id="stages"></div>
+    </section>
+    <section>
+      <h2>Task graph</h2>
+      <div id="graph-wrap"><div id="graph-sizer"><div id="graph"></div></div></div>
+      <div class="legend">
+        <span><i style="background:var(--pending)"></i>pending</span>
+        <span><i style="background:var(--running)"></i>running</span>
+        <span><i style="background:var(--ok)"></i>done</span>
+        <span><i style="background:var(--failed)"></i>failed</span>
+        <span><i style="background:var(--skipped)"></i>skipped by when:</span>
+        <span><i style="background:var(--stalled)"></i>stalled</span>
+        <span>dashed edge = conditional (when:)</span>
+      </div>
+    </section>
+    <details id="timeline-section">
+      <summary><h2>Timeline</h2> <span class="muted" id="timeline-sum"></span></summary>
+      <div id="timeline"></div>
+    </details>
+    <section id="intents-section">
+      <h2>Intents</h2>
+      <table id="intents"></table>
+    </section>
+  </div>
+  <div id="right">
+    <div class="panel" id="detail"><h2>Task</h2><div class="muted">Click a task in the graph.</div></div>
+    <div class="panel">
+      <h2>Diagnostics</h2>
+      <div class="tabs" id="tabs"></div>
+      <pre id="diag"></pre>
+      <div id="outputs" style="display:none"><table id="outlist"></table><div id="viewer"></div></div>
+    </div>
+  </div>
+</main>
+<script src="lemmings.js"></script>
+<script>
+const W = 168, H = 70, GX = 36, GY = 14, PAD = 14, TOP = 30;
+// The tester agent only summarises failures; the tester verdict is shown on run-tests/gate-test.
+const ROLE = { 'test-author': 'test_author', implementer: 'implementer', reviewer: 'reviewer', validator: 'validator' };
+const ROLE_LABEL = { test_author: 'author', implementer: 'impl', tester: 'tests', reviewer: 'review', validator: 'valid' };
+const GATE_ROLE = { 'run-tests': 'tester', 'gate-test': 'tester', 'gate-review': 'reviewer', 'gate-validate': 'validator', 'lock-tests': 'test_author' };
+const STATUS_ORDER = ['failed', 'stalled', 'running', 'ok', 'pending', 'skipped', 'not_run'];
+const hash = new URLSearchParams(location.hash.slice(1));
+let snap = null, selected = hash.get('task'), tab = hash.get('tab') || 'output', es = null;
+// #task=<id>&tab=<tab> keeps the selection across reloads.
+const setHash = () => history.replaceState(null, '', '#' + new URLSearchParams({ ...(selected ? { task: selected } : {}), ...(tab !== 'output' ? { tab } : {}) }));
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = (s) => s == null ? '' : s < 60 ? `${s.toFixed(1)}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(Math.floor(s % 60)).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}m`;
+// 'bash: {"command":"cd /a/b/c/d && ls..."}' -> 'bash cd …/c/d && ls…'
+const brief = (call) => {
+  const m = String(call || '').match(/^([\w.-]+): \{"[^"]*":"?(.*)$/);
+  const v = m ? `${m[1]} ${m[2].replace(/"?(,"[^"]*":.*|\}?)$/, '')}` : String(call || '');
+  return v.replace(/(?:\/[^\s\/"]+){3,}/g, (p) => '…/' + p.split('/').slice(-2).join('/')).replace(/\.\.\.$/, '…');
+};
+// Spinning cogwheel shown on running tasks and sub-agents. The graph is re-rendered on every update, so the
+// animation phase is derived from the clock to keep the rotation smooth across redraws.
+const gear = () => GEAR.replace('<svg class="gear"', `<svg class="gear" style="animation-delay:-${Date.now() % 2400}ms"`);
+const GEAR = '<svg class="gear" viewBox="0 0 24 24" aria-label="running"><path fill="currentColor" fill-rule="evenodd" d="M19.97 10.09 L22.90 10.54 L22.90 13.46 L19.97 13.91 L18.99 16.28 L20.74 18.67 L18.67 20.74 L16.28 18.99 L13.91 19.97 L13.46 22.90 L10.54 22.90 L10.09 19.97 L7.72 18.99 L5.33 20.74 L3.26 18.67 L5.01 16.28 L4.03 13.91 L1.10 13.46 L1.10 10.54 L4.03 10.09 L5.01 7.72 L3.26 5.33 L5.33 3.26 L7.72 5.01 L10.09 4.03 L10.54 1.10 L13.46 1.10 L13.91 4.03 L16.28 5.01 L18.67 3.26 L20.74 5.33 L18.99 7.72Z M15.40 12 A3.4 3.4 0 1 0 8.60 12 A3.4 3.4 0 1 0 15.40 12Z"/></svg>';
+const ago = (ms) => { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
+
+function connect() {
+  if (es) es.close();
+  const log = $('logsel').value;
+  es = new EventSource('api/events' + (log ? `?log=${encodeURIComponent(log)}` : ''));
+  es.onmessage = (e) => { snap = JSON.parse(e.data); render(); };
+  es.onerror = () => { $('runinfo').textContent = 'disconnected – retrying…'; $('live').className = 'live-dot'; };
+}
+$('logsel').onchange = connect;
+const LEM = window.LEM || { on: false, apply() {}, afterGraph() {} };
+LEM.apply();
+$('themebtn').style.display = window.LEM ? '' : 'none';
+$('themebtn').onclick = () => { LEM.toggle(); if (snap) render(); };
+// Status decoration on a box: the cogwheel, or a lemming in the lemmings theme.
+const mark = (st, opts = {}) => LEM.on ? LEM.nodeSprite(st, opts) : st === 'running' ? gear() : '';
+
+function intentFor(run) { return run && snap.state?.intents?.[run.id]; }
+function verdictFor(task, run) {
+  const it = intentFor(run);
+  if (!it || !it.verdicts) return null;
+  // Verdicts in state.json belong to the intent's latest attempt only.
+  if (run.attempt != null && it.attempts != null && Number(it.attempts) !== run.attempt) return null;
+  const role = task.agent ? ROLE[task.agent] : GATE_ROLE[task.id];
+  return role ? it.verdicts[role] || null : null;
+}
+function taskStatus(id) { return snap.run?.tasks?.[id]?.status || 'pending'; }
+
+function render() {
+  if (snap.fatal) { $('runinfo').textContent = 'server error: ' + snap.fatal; return; }
+  const run = snap.run, wf = snap.workflow;
+  $('wfname').textContent = wf.name;
+  $('live').className = 'live-dot' + (run?.live ? ' on' : '');
+  const it = intentFor(run);
+  const noRun = snap.mode === 'loop' ? 'no run logs yet in .task-state/logs (start the orchestrator)'
+    : snap.mode === 'file' ? 'waiting for the log file to appear'
+    : snap.mode === 'runs' ? 'no runs yet for this workflow (no log in the runs folder, none in the engine database)' : 'starting the workflow…';
+  $('runinfo').innerHTML = run
+    ? (it ? `intent <b>${esc(run.id)}</b> · attempt ${esc(run.attempt ?? '?')}` : `run <b>${esc(run.label)}</b>`)
+      + ` · <span class="pill ${esc(run.status)}">${esc(run.status)}</span>`
+      + (it ? ` · intent <span class="pill ${esc(it.status)}">${esc(it.status)}</span> <span class="muted">${esc(it.phase || '')}</span>` : '')
+      + (run.active ? ` · <span class="muted">active: ${esc(run.active.label)} ${esc(fmt(run.active.elapsed))}</span>` : '')
+      + (run.summary ? ` · <span class="muted">${esc(run.summary)}</span>` : '')
+      + ` · <span class="muted">${run.source === 'db' ? 'engine database' : 'log'} updated ${ago(run.updated)}</span>`
+    : esc(wf.error || noRun);
+  const pct = progress(), left = remaining(pct), ended = loopEnded();
+  document.title = ended ? `${ended} • ${wf.name}` : pct == null ? wf.name : `${pct}%${left ? ` • ${left}` : ''} • ${wf.name}`;
+  renderLogs(); renderStages(); renderGraph(); renderTimeline(); renderIntents(); renderDetail(); renderDiag();
+}
+// Finished steps out of all steps, for the tab title. A step is one workflow task (agent or command) of one intent:
+// a completed intent counts all of them, the running one the tasks done or skipped so far (not the running task).
+// Without intents: the shown run's tasks. null when there is nothing to count.
+function progress() {
+  const tasks = snap.workflow.tasks || [], run = snap.run, n = tasks.length;
+  if (!n) return null;
+  const done = () => tasks.filter((t) => ['ok', 'skipped'].includes(run?.tasks?.[t.id]?.status)).length;
+  const intents = snap.state?.intents;
+  if (!intents || !Object.keys(intents).length) return run ? Math.floor(100 * done() / n) : null;
+  const ids = Object.keys(intents), completed = ids.filter((id) => intents[id].status === 'completed').length;
+  const partial = run?.status === 'RUNNING' && intents[run.id] && intents[run.id].status !== 'completed' ? done() : 0;
+  return Math.floor(100 * (completed * n + partial) / (ids.length * n));
+}
+// For the tab title when the intent loop is no longer running with intents left: ESCALATED when some went to a human
+// (needs_human or escalated), else STOPPED. null while it runs, when all intents are done (100%) or nothing ran yet.
+function loopEnded() {
+  const s = snap.state, intents = Object.values(s?.intents || {});
+  if (!s?.loop || s.loop.running || !intents.length || !Object.keys(s.times || {}).length) return null;
+  if (intents.every((it) => it.status === 'completed')) return null;
+  return intents.some((it) => ['needs_human', 'escalated'].includes(it.status)) ? 'ESCALATED' : 'STOPPED';
+}
+// Estimated time left, intents only, from 15% done on: the time spent so far (all intents, all attempts) scaled to the
+// rest. It is worked out again only when an intent completes (or on load), as a finish time, and counts down between.
+// Shown while the loop is working (a log updated in the last 2 minutes).
+const eta = { completed: -1, at: null };
+function remaining(pct) {
+  const intents = snap.state?.intents;
+  if (!intents || pct == null || pct < 15 || pct >= 100) return null;
+  const completed = Object.values(intents).filter((it) => it.status === 'completed').length;
+  if (completed !== eta.completed) {
+    const spent = Object.values(snap.state.times || {}).reduce((a, t) => a + t.secs, 0);
+    Object.assign(eta, { completed, at: Date.now() + 1000 * spent * (100 - pct) / pct });
+  }
+  if (!snap.run || Date.now() - snap.run.updated > 120000) return null;
+  const m = Math.max(1, Math.round((eta.at - Date.now()) / 60000));
+  return m < 60 ? `${m} min${m === 1 ? '' : 's'}` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`;
+}
+
+function renderLogs() {
+  const sel = $('logsel'), cur = sel.value;
+  const opts = ['<option value="">latest</option>'].concat(snap.logs.map((l) => `<option value="${esc(l.key)}">${esc(l.label)} · ${ago(l.mtime)}</option>`));
+  const html = opts.join('');
+  if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; sel.value = cur; }
+}
+
+function aggregate(statuses) {
+  if (!statuses.length) return 'pending';
+  if (statuses.includes('failed')) return 'failed';
+  if (statuses.includes('stalled')) return 'stalled';
+  if (statuses.includes('running')) return 'running';
+  if (statuses.every((s) => s === 'skipped' || s === 'not_run')) return statuses.includes('skipped') ? 'skipped' : 'not_run';
+  if (statuses.every((s) => s === 'ok' || s === 'skipped' || s === 'not_run')) return 'ok';
+  if (statuses.some((s) => s === 'ok')) return 'running';
+  return 'pending';
+}
+function renderStages() {
+  const wf = snap.workflow;
+  $('stages').innerHTML = wf.stages.map((name, i) => {
+    const tasks = wf.tasks.filter((t) => t.stage === i);
+    const st = snap.run ? aggregate(tasks.map((t) => taskStatus(t.id))) : 'pending';
+    const done = tasks.filter((t) => ['ok', 'skipped'].includes(taskStatus(t.id))).length;
+    return `<div class="stage ${st}" title="${esc(tasks.map((t) => `${t.id}: ${taskStatus(t.id)}`).join('\n'))}">${esc(name)}<small>${done}/${tasks.length} · ${st.replace('_', ' ')}</small></div>`;
+  }).join('');
+}
+
+// Graph columns sit under the stage boxes (same x and width) when nodes fit at >= 80 % scale;
+// otherwise fixed-width columns and horizontal scrolling. Coordinates are unscaled.
+const M = 10, MIN_W = 130;
+function columns(n) {
+  const wrap = $('graph-wrap'), boxes = [...$('stages').children];
+  if (boxes.length === n && n) {
+    const left = wrap.getBoundingClientRect().left + wrap.clientLeft;
+    const rects = boxes.map((b) => b.getBoundingClientRect());
+    const minW = Math.min(...rects.map((r) => r.width));
+    const scale = Math.min(1, minW / (MIN_W + 2 * M));
+    if (scale >= 0.8) {
+      return { scale, aligned: true, x: rects.map((r) => (r.left - left) / scale + M), w: rects.map((r) => r.width / scale - 2 * M), width: wrap.clientWidth / scale };
+    }
+  }
+  return { scale: null, aligned: false, x: Array.from({ length: n }, (_, i) => PAD + i * (W + GX)), w: Array(n).fill(W), width: PAD * 2 + n * (W + GX) - GX };
+}
+// Orchestrator sub-agents get their own boxes right under their task (a dashed placeholder until the run
+// spawns them, since their number comes from the run).
+const SH = 52, IND = 18;
+// The lemmings theme leaves more room between boxes of a stage, for the floaters to fall.
+const gapY = () => LEM.on ? 40 : GY;
+function positions(cols) {
+  const pos = {}, subs = {}, next = {};
+  for (const t of snap.workflow.tasks) {
+    const x = cols.x[t.stage], w = cols.w[t.stage];
+    let y = next[t.stage] ?? TOP;
+    pos[t.id] = { x, w, y };
+    y += H + gapY();
+    if (t.type === 'orchestrator') {
+      const list = snap.run?.tasks?.[t.id]?.subagents || [];
+      subs[t.id] = (list.length ? list : [null]).map((sp, i) => {
+        const b = { x: x + IND, w: w - IND, y, i, sp };
+        y += SH + gapY();
+        return b;
+      });
+    }
+    next[t.stage] = y;
+  }
+  return { pos, subs, bottom: Math.max(TOP, ...Object.values(next)) };
+}
+function subStatus(sp, parent) {
+  if (!sp) return ['skipped', 'not_run'].includes(parent) ? 'not_run' : 'pending';
+  if (sp.live) return 'running';
+  return ['failed', 'stalled'].includes(parent) ? parent : 'ok';
+}
+function renderGraph() {
+  const wf = snap.workflow, cols = columns(wf.stages.length), { pos, subs, bottom } = positions(cols);
+  const width = cols.width;
+  const height = bottom + PAD;
+  let edges = '';
+  const edgeColor = (st) => st === 'running' ? '#3b82f6' : st === 'ok' ? '#2f7a4a' : st === 'failed' ? '#ef4444' : st === 'stalled' ? '#f59e0b' : '#4a5263';
+  for (const [id, list] of Object.entries(subs)) {
+    const o = pos[id], parent = taskStatus(id), tx = o.x + IND / 2;
+    for (const b of list) {
+      const y = b.y + SH / 2, dash = b.sp ? '' : ' stroke-dasharray="4 4"';
+      edges += `<path d="M${tx},${o.y + H} L${tx},${y - 6} Q${tx},${y} ${tx + 6},${y} L${b.x - 2},${y}" fill="none" stroke="${edgeColor(subStatus(b.sp, parent))}" stroke-width="1.6"${dash} marker-end="url(#arr)"/>`;
+    }
+  }
+  for (const t of wf.tasks) {
+    for (const d of t.primary_deps) {
+      const a = pos[d], b = pos[t.id];
+      if (!a || !b) continue;
+      const sd = taskStatus(d), stt = taskStatus(t.id);
+      const color = stt === 'skipped' || stt === 'not_run' ? '#3a404c' : sd === 'ok' && stt !== 'pending' ? '#2f7a4a' : stt === 'running' ? '#3b82f6' : '#4a5263';
+      const dash = t.when ? ' stroke-dasharray="5 4"' : '';
+      // Lemmings theme: the lemmings' own terrain replaces arrows within a stage, arrows up to a higher box, and
+      // arrows out of finished tasks (see LEM.plan).
+      if (LEM.on && (Math.abs(a.x - b.x) < 1 ? b.y > a.y : a.x < b.x && (b.y + H <= a.y || ['ok', 'skipped'].includes(sd)))) continue;
+      let p;
+      if (Math.abs(a.x - b.x) < 1) {
+        const x = a.x + a.w / 2;
+        p = b.y > a.y ? `M${x},${a.y + H} L${x},${b.y - 2}` : `M${a.x + a.w},${a.y + H / 2} C${a.x + a.w + 30},${a.y + H / 2} ${b.x + b.w + 30},${b.y + H / 2} ${b.x + b.w + 2},${b.y + H / 2}`;
+      } else {
+        const x1 = a.x + a.w, y1 = a.y + H / 2, x2 = b.x - 2, y2 = b.y + H / 2, mx = (x1 + x2) / 2;
+        p = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+      }
+      edges += `<path d="${p}" fill="none" stroke="${color}" stroke-width="1.6"${dash} marker-end="url(#arr)"/>`;
+    }
+  }
+  // Lemmings: bridges, stairs, the exit door (on the last task: the bottom box of the right-most stage) and the
+  // lemmings' journeys.
+  const lastStage = Math.max(...wf.tasks.map((t) => t.stage));
+  const exitId = wf.tasks.filter((t) => t.stage === lastStage)
+    .reduce((a, t) => (!a || (pos[t.id]?.y ?? 0) >= (pos[a.id]?.y ?? 0) ? t : a), null)?.id;
+  const lem = LEM.on ? LEM.plan({ tasks: wf.tasks, pos, H, status: taskStatus, exitId }) : null;
+  if (lem) edges += lem.svg;
+  const titles = wf.stages.map((n, i) => `<div class="col-title" style="left:${cols.x[i]}px;top:8px;width:${cols.w[i]}px" title="${esc(n)}">${esc(n)}</div>`).join('');
+  const nodes = wf.tasks.map((t) => {
+    const p = pos[t.id], r = snap.run?.tasks?.[t.id] || {}, st = r.status || 'pending';
+    const v = ['ok', 'failed'].includes(st) ? verdictFor(t, snap.run) : null;
+    const sub = t.type !== 'command' && t.agent ? `${t.type === 'orchestrator' ? '👥' : '🤖'} ${esc(t.agent)}${t.model ? ' · ' + esc(t.model) : ''}` : '⚙︎ command';
+    const a = st === 'running' ? r.activity : null, act = a && (a.last ? brief(a.last) : a.now);
+    const cond = act ? `<div class="act" title="${esc([a.now && 'now: ' + a.now, a.last && 'last: ' + a.last].filter(Boolean).join('\n'))}">▸ ${esc(act)}</div>`
+      : t.when ? `<div class="cond" title="${esc(t.when)}">if ${esc(t.when.replace(/\$\{tasks\.([\w-]+)\.output\?\}/g, '$1'))}</div>` : '';
+    const took = r.duration || (st === 'running' && r.start != null ? fmt((a?.elapsed) ?? snap.run.clock - r.start) : '');
+    const subs = r.subagents || [], liveSubs = subs.filter((x) => x.live).length;
+    const subBadge = subs.length ? `<span class="pill ${liveSubs ? 'running' : ''}" title="${subs.length} sub-agents${liveSubs ? `, ${liveSubs} running` : ''}">👥 ${liveSubs || subs.length}</span>` : '';
+    const badges = [subBadge, took ? `<span class="muted" style="font-size:10px">${esc(took)}</span>` : '', v ? `<span class="pill ${esc(v)}">${esc(v)}</span>` : ''].join('');
+    const m = mark(st);
+    return `<div class="node ${st}${selected === t.id ? ' sel' : ''}${m ? ' has-spr' : ''}" data-id="${esc(t.id)}" style="left:${p.x}px;top:${p.y}px;width:${p.w}px" title="${esc(t.name ? t.name + ' (' + t.id + ')' : t.id)} — ${esc(st)}">
+      ${m}<div class="id">${esc(t.name || t.id)}</div><div class="sub">${sub}</div><div class="foot">${cond}<div class="badges">${badges}</div></div></div>`;
+  }).join('') + Object.entries(subs).map(([id, list]) => {
+    const t = wf.tasks.find((x) => x.id === id), parent = taskStatus(id), who = t.agent_name || t.agent || 'sub-agent';
+    return list.map((b) => {
+      const st = subStatus(b.sp, parent), sp = b.sp;
+      if (!sp) {
+        return `<div class="node subnode ghost ${st}" data-id="${esc(id)}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px" title="${esc(who)}: one sub-agent per item, created when the task runs">
+          <div class="id">${esc(who)} × N</div><div class="sub">parallel sub-agents, created at run time</div></div>`;
+      }
+      const act = sp.last ? brief(sp.last) : '';
+      const m = mark(st, { small: true });
+      return `<div class="node subnode ${st}${selected === id ? ' sel' : ''}${m ? ' has-spr' : ''}" data-id="${esc(id)}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px" title="${esc(who)} #${b.i + 1} — ${esc(st)}${sp.last ? '\nlast: ' + esc(sp.last) : ''}">
+        ${m}<div class="id">${esc(who)} #${b.i + 1}</div>
+        <div class="foot">${act ? `<div class="${st === 'running' ? 'act' : 'sub'}">${st === 'running' ? '▸ ' : ''}${esc(act)}</div>` : ''}<div class="badges"><span class="muted" style="font-size:10px">${fmt(sp.end - sp.start)}</span></div></div></div>`;
+    }).join('');
+  }).join('');
+  $('graph').style.width = width + 'px';
+  $('graph').style.height = height + 'px';
+  $('graph').innerHTML = `${titles}${lem ? lem.html : ''}<svg width="${width}" height="${height}"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6b7385"/></marker></defs>${edges}</svg>${nodes}`;
+  // Shrink to fit the visible width (down to 80 %), scroll horizontally beyond that.
+  const avail = $('graph-wrap').clientWidth, scale = cols.scale ?? Math.max(0.8, Math.min(1, avail / width));
+  $('graph').style.transform = scale < 1 ? `scale(${scale})` : '';
+  $('graph-sizer').style.width = Math.ceil(width * scale) + 'px';
+  $('graph-sizer').style.height = Math.ceil(height * scale) + 'px';
+  $('graph').querySelectorAll('.node').forEach((el) => { el.onclick = () => { selected = el.dataset.id; setHash(); render(); }; });
+  LEM.afterGraph($('graph'), lem?.journeys || []);
+}
+
+// Gantt of the selected run on the run clock (seconds since start, from the engine's phase timers).
+// Shown only once the run is over, collapsed until the user opens it. Each row has its stage's colour (name and
+// finished bar; repeats after 8 stages); failed, stalled and running bars keep their status colour.
+const STAGE_COLORS = ['#a78bfa', '#38bdf8', '#f472b6', '#2dd4bf', '#a3e635', '#e879f9', '#fdba74', '#fde047'];
+const stageColor = (i) => (i == null || i < 0 ? '' : STAGE_COLORS[i % STAGE_COLORS.length]);
+function renderTimeline() {
+  const run = snap.run, rows = [];
+  for (const t of snap.workflow.tasks) {
+    const r = run?.tasks?.[t.id];
+    if (!r || r.start == null) continue;
+    rows.push({ t, r });
+  }
+  const show = rows.length && run.status !== 'RUNNING';
+  $('timeline-section').style.display = show ? '' : 'none';
+  if (!show) return;
+  rows.sort((a, b) => a.r.start - b.r.start || (a.r.seq ?? 0) - (b.r.seq ?? 0));
+  const total = Math.max(run.clock || 0, ...rows.map((x) => x.r.end)) || 1;
+  $('timeline-sum').textContent = `${rows.length} task${rows.length === 1 ? '' : 's'} · ${fmt(total)}`;
+  if (!$('timeline-section').open) return;
+  const step = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((s) => total / s <= 6) || 7200;
+  const ticks = [];
+  for (let x = 0; x <= total + 1e-9; x += step) ticks.push(x);
+  const pct = (x) => `${(x / total * 100).toFixed(3)}%`;
+  const grid = ticks.map((x) => `<div class="tl-grid" style="left:${pct(x)}"></div>`).join('');
+  const bar = (cls, a, b, title) => `<div class="tl-track">${grid}<div class="tl-bar ${cls}" style="left:${pct(a)};width:${pct(Math.max(0, b - a))}" title="${esc(title)}"></div></div>`;
+  let html = `<div class="tl-axis">${ticks.map((x) => `<span style="left:${pct(x)}">${x ? fmt(x).replace(/\.0s$/, 's') : '0'}</span>`).join('')}</div>`;
+  for (const { t, r } of rows) {
+    const name = t.name || t.id, d = r.end - r.start, sc = stageColor(t.stage), stage = snap.workflow.stages[t.stage];
+    const sty = sc ? ` style="--sc:${sc}"` : '';
+    html += `<div class="tl-row${selected === t.id ? ' sel' : ''}" data-id="${esc(t.id)}"${sty}><div class="tl-name" title="${esc(stage ? `${stage}: ${name}` : name)}">${esc(name)}</div>`
+      + bar(r.status, r.start, r.end, `${name}: ${fmt(r.start)} → ${fmt(r.end)} (${fmt(d)})`) + `<div class="tl-dur">${esc(r.duration || fmt(d))}</div></div>`;
+    (r.subagents || []).forEach((x, i) => {
+      html += `<div class="tl-row sub" data-id="${esc(t.id)}"${sty}><div class="tl-name">sub-agent #${i + 1}</div>`
+        + bar(x.live ? 'running' : r.status === 'running' ? 'ok' : r.status, x.start, x.end, `sub-agent #${i + 1}: ${fmt(x.end - x.start)}`) + `<div class="tl-dur">${fmt(x.end - x.start)}</div></div>`;
+    });
+  }
+  $('timeline').innerHTML = html;
+  $('timeline').querySelectorAll('.tl-row').forEach((el) => { el.onclick = () => { selected = el.dataset.id; setHash(); render(); }; });
+}
+$('timeline-section').addEventListener('toggle', () => { if (snap) renderTimeline(); });
+
+function renderIntents() {
+  const s = snap.state;
+  $('intents-section').style.display = s || snap.stateError ? '' : 'none';
+  if (!s) { $('intents').innerHTML = `<tr><td class="muted">${esc(snap.stateError || 'no .task-state/state.json yet')}</td></tr>`; return; }
+  const ids = Object.keys(s.intents);
+  const order = [...s.critical_path.filter((i) => ids.includes(i)), ...ids.filter((i) => !s.critical_path.includes(i))];
+  const latest = {};
+  snap.logs.forEach((l) => { if (!latest[l.id]) latest[l.id] = l.key; });
+  // Time: all attempts of an intent (failed ones too); the column's header is the sum over every intent.
+  const tms = Object.values(s.times || {}), total = tms.reduce((a, t) => a + t.secs, 0);
+  // The engine reports a run COMPLETED when the workflow ran to its end, also when the attempt failed; a later attempt
+  // means the earlier ones failed, and a log numbered past the state's attempts is left from before a reset.
+  const tries = (t, it) => [...t.attempts].sort((a, b) => (a.attempt ?? 0) - (b.attempt ?? 0)).map((a) => {
+    const n = a.attempt ?? 0, last = it.attempts ?? 0;
+    const what = a.status === 'RUNNING' ? 'running' : n > last ? 'before a reset' : n < last ? 'failed' : it.status;
+    return `#${a.attempt ?? '?'} ${fmt(a.secs)} ${what}`;
+  }).join('\n');
+  $('intents').innerHTML = `<tr><th></th><th>Intent</th><th>Status</th><th>Phase</th><th>Att.</th><th>Verdicts</th><th>Deps</th><th title="total time: all intents, all attempts">${tms.length ? esc(fmt(total)) : 'Time'}</th></tr>`
+    + order.map((id) => {
+    const it = s.intents[id], v = it.verdicts || {}, tm = s.times?.[id];
+    const vs = ['test_author', 'implementer', 'tester', 'reviewer', 'validator'].filter((k) => v[k]).map((k) => `<span class="pill ${esc(v[k])}" title="${k}">${esc(ROLE_LABEL[k])}:${esc(v[k])}</span>`).join(' ');
+    const open = intentText.has(id), text = intentText.get(id);
+    return `<tr class="${snap.run?.id === id ? 'cur' : ''}${latest[id] ? ' click' : ''}" data-log="${esc(latest[id] || '')}">
+      <td class="eye${open ? ' on' : ''}" data-id="${esc(id)}" title="${open ? 'Hide' : 'Show'} the intent's content">${EYE}</td>
+      <td><b>${esc(id)}</b><div class="muted" style="font-size:11px">${esc((it.intent_file || '').split('/').pop())}</div></td>
+      <td><span class="pill ${esc(it.status)}">${esc(it.status)}</span></td><td class="muted">${esc(it.phase || '')}</td>
+      <td>${esc(it.attempts ?? 0)}</td><td>${vs}</td><td class="muted">${esc((it.depends_on || []).join(', '))}</td>
+      <td title="${tm ? esc(tries(tm, it)) : ''}">${tm ? esc(fmt(tm.secs)) : ''}</td></tr>`
+      + (open ? `<tr class="intent-text"><td></td><td colspan="7"><pre>${esc(text ?? 'loading…')}</pre></td></tr>` : '');
+  }).join('');
+  $('intents').querySelectorAll('tr.click').forEach((tr) => { tr.onclick = () => { $('logsel').value = tr.dataset.log; connect(); }; });
+  $('intents').querySelectorAll('td.eye').forEach((td) => { td.onclick = (e) => { e.stopPropagation(); toggleIntent(td.dataset.id); }; });
+}
+// Intents whose text is shown under their row (id -> text, null while loading); read again each time it is opened.
+const intentText = new Map();
+const EYE = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12Z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+function toggleIntent(id) {
+  if (intentText.has(id)) { intentText.delete(id); return renderIntents(); }
+  intentText.set(id, null);
+  renderIntents();
+  fetch('api/intent?id=' + encodeURIComponent(id)).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+    .catch((e) => `could not read the intent file (${e.message})`)
+    .then((t) => { if (intentText.has(id)) { intentText.set(id, t); renderIntents(); } });
+}
+
+function renderDetail() {
+  const t = snap.workflow.tasks.find((x) => x.id === selected);
+  if (!t) return;
+  const r = snap.run?.tasks?.[t.id] || {};
+  const v = verdictFor(t, snap.run);
+  $('detail').innerHTML = `<h2>Task</h2><div class="kv">
+    ${t.name ? `<div>name</div><div><b>${esc(t.name)}</b></div>` : ''}
+    <div>id</div><div>${t.name ? esc(t.id) : `<b>${esc(t.id)}</b>`}</div>
+    <div>status</div><div><span class="pill ${esc(r.status || 'pending')}">${esc(r.status || 'pending')}</span> ${esc(r.duration || '')}</div>
+    ${r.start != null ? `<div>time</div><div>${fmt(r.start)} → ${fmt(r.end)} <span class="muted">(run clock)</span></div>` : ''}
+    ${r.activity ? `<div>running</div><div>${fmt(r.activity.elapsed)}${r.activity.now ? ` · now <b>${esc(r.activity.now)}</b>` : ''}</div>
+      ${r.activity.last ? `<div>last call</div><div class="calls">${esc(r.activity.last)}</div>` : ''}` : ''}
+    <div>type</div><div>${esc(t.type)}${t.agent ? ` · ${esc(t.agent)} (${esc(t.model || 'default')})` : ''}</div>
+    ${v ? `<div>verdict</div><div><span class="pill ${esc(v)}">${esc(v)}</span></div>` : ''}
+    <div>depends on</div><div>${esc(t.depends_on.join(', ') || '—')}</div>
+    ${t.when ? `<div>when</div><div><code>${esc(t.when)}</code></div>` : ''}
+    ${r.reason ? `<div>skipped</div><div>${esc(r.reason)}</div>` : ''}
+    ${t.description ? `<div>job</div><div class="muted">${esc(t.description)}</div>` : ''}
+  </div>${(r.subagents || []).length ? `<h2 style="margin-top:10px">Sub-agents (${r.subagents.length})</h2><table>${r.subagents.map((x, i) => `<tr>
+      <td style="white-space:nowrap">${x.live ? '<span class="live-dot on"></span>' : '<span class="live-dot"></span>'}#${i + 1}</td>
+      <td style="white-space:nowrap">${fmt(x.end - x.start)}</td><td class="calls" title="${esc(x.last || '')}">${esc(brief(x.last) || '—')}</td></tr>`).join('')}</table>` : ''}${r.error ? `<h2 style="margin-top:10px">Error</h2><pre>${esc(r.error)}</pre>` : ''}`;
+}
+
+function renderDiag() {
+  const it = intentFor(snap.run), d = snap.diagnostics || {};
+  const tabs = it
+    ? { output: 'Run output', feedback: 'Feedback', gates: 'Gates log', tests: 'Test log', engine: 'Engine errors' }
+    : { output: 'Run output', engine: 'Engine errors' };
+  if (snap.outputs) tabs.outputs = 'Outputs';
+  if (!tabs[tab]) tab = 'output';
+  $('tabs').innerHTML = Object.entries(tabs).map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-k="${k}">${n}</button>`).join('');
+  $('tabs').querySelectorAll('button').forEach((b) => { b.onclick = () => { tab = b.dataset.k; setHash(); renderDiag(); }; });
+  $('outputs').style.display = tab === 'outputs' ? '' : 'none';
+  $('diag').style.display = tab === 'outputs' ? 'none' : '';
+  if (tab === 'outputs') { loadOutputs(); return; }
+  let text;
+  if (tab === 'output') text = snap.run?.output || 'no output yet';
+  else if (tab === 'feedback') {
+    const fb = it?.feedback || {};
+    text = Object.keys(fb).length ? Object.entries(fb).map(([k, v]) => `[${k}]\n${typeof v === 'string' ? v : JSON.stringify(v, null, 2)}`).join('\n\n') : 'no feedback recorded';
+  } else if (tab === 'gates') text = d.gates ?? 'no gates log';
+  else if (tab === 'tests') text = d.tests ?? 'no test log';
+  else text = snap.run?.errors?.length ? snap.run.errors.join('\n') : 'no engine errors';
+  const pre = $('diag'), atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+  pre.style.whiteSpace = tab === 'output' ? 'pre' : '';
+  if (pre.textContent !== text) { pre.textContent = text; if (atBottom && tab !== 'feedback') pre.scrollTop = pre.scrollHeight; }
+}
+
+// Outputs tab: files under the --outputs dirs changed during the selected run (refreshed every 5 s).
+const outs = { key: null, at: 0, data: null, viewing: null };
+const BINARY = /\.(html?|pdf|png|jpe?g|gif|svg|webp|pptx?|docx?|xlsx?|zip)$/i;
+const size = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+const fileUrl = (f) => 'api/file?path=' + encodeURIComponent(f);
+function loadOutputs() {
+  const key = $('logsel').value;
+  if (outs.key === key && Date.now() - outs.at < 5000) return renderOutputs();
+  if (outs.key !== key) { outs.data = null; outs.viewing = null; $('viewer').innerHTML = ''; }
+  outs.key = key; outs.at = Date.now();
+  fetch('api/outputs' + (key ? `?log=${encodeURIComponent(key)}` : '')).then((r) => r.json()).then((d) => { outs.data = d; renderOutputs(); }).catch(() => {});
+  renderOutputs();
+}
+function renderOutputs() {
+  const d = outs.data;
+  const html = !d ? '<tr><td class="muted">loading…</td></tr>'
+    : !d.files.length ? `<tr><td class="muted">no files changed during this run in ${esc(d.dirs.join(', '))}</td></tr>`
+    : d.files.map((f) => `<tr class="click${outs.viewing === f.path ? ' on' : ''}" data-f="${esc(f.path)}" data-size="${f.size}"><td class="f">${esc(f.rel)}</td><td class="muted" style="white-space:nowrap">${size(f.size)}</td><td class="muted" style="white-space:nowrap">${ago(f.mtime)}</td></tr>`).join('');
+  if ($('outlist').dataset.html === html) return;
+  $('outlist').innerHTML = $('outlist').dataset.html = html;
+  $('outlist').querySelectorAll('tr.click').forEach((tr) => { tr.onclick = () => viewFile(tr.dataset.f, Number(tr.dataset.size)); });
+}
+function viewFile(f, n) {
+  if (BINARY.test(f) || n > 2 * 1048576) { window.open(fileUrl(f), '_blank'); return; }
+  outs.viewing = f; $('outlist').dataset.html = ''; renderOutputs();
+  fetch(fileUrl(f)).then((r) => r.text()).then((t) => {
+    if (outs.viewing !== f) return;
+    $('viewer').innerHTML = `<h3><span>${esc(f.split('/').pop())}</span><a href="${fileUrl(f)}" target="_blank">open ↗</a></h3><pre></pre>`;
+    $('viewer').querySelector('pre').textContent = t;
+  });
+}
+
+connect();
+setInterval(() => { if (snap) render(); }, 5000); // refresh relative times
+window.addEventListener('resize', () => { if (snap) render(); });
+</script>
+</body>
+</html>
