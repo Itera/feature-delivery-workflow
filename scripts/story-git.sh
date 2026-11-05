@@ -158,7 +158,9 @@ setup_check() {
   [ "$(printf '%s\n' "$man" | cut -d' ' -f1)" = "$(printf '%s\n' "$now" | cut -d' ' -f1)" ]     || bad+="locked setup files added or removed: $(diff <(printf '%s\n' "$man" | cut -d' ' -f1) <(printf '%s\n' "$now" | cut -d' ' -f1) | grep -E '^[<>]' | paste -sd ' ' -); "
   while IFS=' ' read -r f h; do
     [ -n "$f" ] && [ -f "$f" ] || continue
-    case "$f" in package.json|*/package.json) [ "$(printf '%s\n' "$now" | grep -F "$f " | head -1)" = "$f $h" ] || bad+="$f: test/build/lint scripts changed; "; continue ;; esac
+    # package.json scripts entries (JSON, not a blob id) must be unchanged; a package.json that is also in locked_also
+    # appears a second time as a blob and takes the additions-only path below.
+    case "$h" in '{'*|'"'*) printf '%s\n' "$now" | grep -qFx -- "$f $h" || bad+="$f: test/build/lint scripts changed; "; continue ;; esac
     cur=$(git hash-object --no-filters -- "$f"); [ "$cur" = "$h" ] && continue
     old="$RUN/tmp/setup-old"; git cat-file -p "$h" > "$old" || { bad+="$f: locked content missing; "; continue; }
     d=$(git diff --no-index --no-color --unified=0 --ignore-cr-at-eol -- "$old" "$f" | grep -E '^[-+]' | grep -vE '^(---|\+\+\+) ')
