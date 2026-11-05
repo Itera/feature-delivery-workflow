@@ -75,7 +75,7 @@ if [ "$(cfg dashboard.open_browser)" != false ]; then
     ( cd "$F/dashboard" && nohup node server.js --workflow "$F/projects/$project/generated/delivery.yaml" --runs "$board" --port "$port"         >"$board/server.log" 2>&1 & echo $! > "$board/server.pid" )
     echo "http://localhost:$port/" > "$board/url"; sleep 2
     say "board: http://localhost:$port/ (Lemmings: the button at top right, remembered for this port)"
-    cmd.exe //c start "" "http://localhost:$port/" >/dev/null 2>&1 || true
+    explorer.exe "http://localhost:$port/" >/dev/null 2>&1 || true   # opens the default browser (exit code is always 1)
   fi
 fi
 
