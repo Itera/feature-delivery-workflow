@@ -70,3 +70,24 @@ plat_df_bin() {
   done
   return 1
 }
+
+# plat_port_pid <port>: native PID of the process listening on a local TCP port (empty if none).
+plat_port_pid() {
+  if [ "$PLAT_OS" = windows ]; then
+    netstat -ano 2>/dev/null | awk -v p=":$1" '$1=="TCP" && $4=="LISTENING" && substr($2, length($2)-length(p)+1)==p {print $5; exit}'
+  else
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1
+  fi
+}
+
+# plat_stop_port <port>: stop the node process listening on <port> (our board server). Returns 0 if it stopped one.
+plat_stop_port() {
+  local pid; pid=$(plat_port_pid "$1"); [ -n "$pid" ] || return 1
+  if [ "$PLAT_OS" = windows ]; then
+    tasklist.exe //FI "PID eq $pid" //NH //FO CSV 2>/dev/null | head -1 | grep -qi '"node.exe"' || return 1
+    taskkill.exe //PID "$pid" //T //F >/dev/null 2>&1
+  else
+    [ "$(ps -p "$pid" -o comm= 2>/dev/null | sed 's#.*/##')" = node ] || return 1
+    kill "$pid" 2>/dev/null
+  fi
+}

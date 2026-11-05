@@ -96,21 +96,24 @@ ts set "$local_id" "local_id=$local_id" "story_file=$sf" "branch=$branch" "base=
 # only when it serves another project's workflow. Board servers of earlier per-round boards are stopped.
 board="$F/runs/.board"; mkdir -p "$board"
 wf_board="$F/projects/$project/generated/delivery.yaml"
-for p in "$F"/runs/*/*/r*/board/server.pid; do
-  [ -f "$p" ] || continue; kill "$(cat "$p")" 2>/dev/null && say "board: stopped an earlier per-round board ($(dirname "$p"))"; rm -f "$p"
+# Servers are stopped by the port they listen on (plat_stop_port): on Windows, $! of a background node is the shell
+# wrapper's PID, not node.exe's, so a recorded PID cannot stop it.
+for u in "$F"/runs/*/*/r*/board/url; do
+  [ -f "$u" ] || continue; op=$(sed -E 's#.*:([0-9]+)/?$#\1#' "$u")
+  plat_stop_port "$op" && say "board: stopped an earlier per-round board on port $op"; rm -f "$u" "$(dirname "$u")/server.pid"
 done
 if [ "$(cfg dashboard.open_browser)" != false ]; then
   port=$(cfg dashboard.port); port=${port:-4777}; url="http://localhost:$port/"
   up() { curl -s -o /dev/null "${url}api/snapshot"; }
-  if up && [ -f "$board/server.pid" ] && [ "$(cat "$board/server.workflow" 2>/dev/null)" = "$wf_board" ]; then
+  if up && [ "$(cat "$board/server.port" 2>/dev/null)" = "$port" ] && [ "$(cat "$board/server.workflow" 2>/dev/null)" = "$wf_board" ]; then
     say "board: $url (shared, already running)"
   else
-    if [ -f "$board/server.pid" ]; then kill "$(cat "$board/server.pid")" 2>/dev/null; rm -f "$board/server.pid"; sleep 1; fi
+    if [ -f "$board/server.port" ]; then plat_stop_port "$(cat "$board/server.port")"; rm -f "$board/server.port"; sleep 1; fi
     if up; then
       say "board: port $port is taken by something else; no board (set dashboard.port)"
     else
-      ( cd "$F/dashboard" && nohup node server.js --workflow "$wf_board" --runs "$board" --port "$port" >"$board/server.log" 2>&1 & echo $! > "$board/server.pid" )
-      echo "$wf_board" > "$board/server.workflow"; sleep 2
+      ( cd "$F/dashboard" && nohup node server.js --workflow "$wf_board" --runs "$board" --port "$port" >"$board/server.log" 2>&1 & )
+      echo "$wf_board" > "$board/server.workflow"; echo "$port" > "$board/server.port"; sleep 2
       say "board: $url (Lemmings: the button at top right, remembered for this port)"
       plat_open "$url"
     fi
