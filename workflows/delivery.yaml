@@ -6,7 +6,7 @@
 # surfaces (ADR-0002); runs outside the project (ADR-0001); merge -> publish (draft PR, human merge).
 name: delivery
 version: "0.0.0-inc0"
-description: "One attempt at one story: preflight -> branch -> acceptance tests (locked) -> implement -> test gate -> review -> validate -> PR text -> publish -> report."
+description: "One attempt at one story: preflight -> branch -> acceptance tests (locked) -> implement -> test gate -> review -> validate -> PR text -> publish -> change guide -> report."
 metadata:
   stages:
     - name: Setup
@@ -23,6 +23,8 @@ metadata:
       tasks: [full-tests, snapshot-before-validate, validate, cleanup-after-validate, gate-validate]
     - name: Publish
       tasks: [write-pr, publish]
+    - name: Explain
+      tasks: [explain, guide]
     - name: Report
       tasks: [report]
 variables:
@@ -129,6 +131,18 @@ agents:
     cwd: "${repo_path}"
     additional_dirs: ["${docs_dir}"]
     prompt: '@file:prompts/pr-writer.md'
+    permissions:
+      mode: acceptEdits
+      allowed_tools: [Read, Grep, Glob, Bash]
+      denied_tools: ["mcp__*", PowerShell, Write, Edit, Agent, Task, Skill, Workflow, "Bash(git commit:*)", "Bash(git push:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git reset:*)", "Bash(git restore:*)", "Bash(git stash:*)", "Bash(git clean:*)", "Bash(git add:*)", "Bash(rm:*)", "Bash(gh:*)"]
+  - id: explainer
+    type: specialist
+    name: explainer
+    runtime: claude
+    model: "{{models.explainer}}"
+    cwd: "${repo_path}"
+    additional_dirs: ["${docs_dir}"]
+    prompt: '@file:prompts/explainer.md'
     permissions:
       mode: acceptEdits
       allowed_tools: [Read, Grep, Glob, Bash]
@@ -271,12 +285,27 @@ tasks:
     parameters:
       command: "{{GATE publish ${publish_mode} ${story_file} ${story_hash}}}"
     depends_on: [write-pr, gate-validate]
+  - id: explain
+    name: explain
+    description: Write the change-guide text for story ${task_id} (criteria -> changes -> tests), following your prompt.
+    type: standard
+    agent: explainer
+    when: "${tasks.gate-validate.output?} == PASS"
+    depends_on: [publish]
+  - id: guide
+    name: guide
+    # Deterministic: builds the local HTML guide and every code link from the real diff (PLAN C8). Never judges the story.
+    type: command
+    when: "${tasks.gate-validate.output?} == PASS"
+    parameters:
+      command: "{{GATE guide}}"
+    depends_on: [explain]
   - id: report
     name: report
     description: Report the outcome of story ${task_id} from the state file, following your prompt.
     type: standard
     agent: reporter
-    depends_on: [gate-test, gate-review, gate-validate, publish]
+    depends_on: [gate-test, gate-review, gate-validate, publish, guide]
 settings:
   max_concurrency: 1
   timeout: "{{budget.run_timeout_min}}m"

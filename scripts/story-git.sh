@@ -16,6 +16,7 @@
 #   gate-test <run_result> <accept_hash> <setup_hash>   prints GREEN only if run-tests was GREEN and nothing locked changed
 #   gate reviewer|validator <attempt> <tree> <head>
 #   cleanup | park | git-meta | plan-hash <file>
+#   guide                         NEW. local change guide after publish (explainer text + links from the real diff)
 #   publish <dry|draft-pr> <story_file> <story_hash>   NEW (replaces merge): commit explicit paths, isolation + disclosure checks, push, draft PR
 # Snapshot fields always come last, so a task can pass ${tasks.<snapshot>.output?} whole (extra words are ignored).
 #
@@ -424,6 +425,18 @@ publish)
   url=$(gh pr create "${args[@]}" 2>&1 | tail -1) || fail publishing PUBLISH=FAILED "gh pr create: $url"
   st phase=published status=pr_open "commit=$(git rev-parse HEAD)" "pr=$url" published=pr
   echo "PUBLISH=PR $url"
+  ;;
+guide)
+  # Local change guide after publish (PLAN C8): the explainer's text + links computed from the real diff, written to the
+  # project's ignored local folder and the run folder only. Never fails the story: a missing guide is reported, not judged.
+  [ -n "$(ts get "$task_id" published 2>/dev/null)" ] || { echo "GUIDE=SKIPPED not published"; exit 0; }
+  [ -n "$(ts get "$task_id" guide 2>/dev/null)" ] || { echo "GUIDE=SKIPPED no text from the explainer"; exit 0; }
+  fshow scripts/guide.mjs > "$RUN/tmp/guide.mjs" || { echo "GUIDE=FAILED no trusted guide.mjs"; exit 0; }
+  out="$LOCAL_DIR/guide/$(ts get "$task_id" local_id).html"
+  res=$(node "$RUN/tmp/guide.mjs" --repo "$REPO" --base "origin/$base" --state "$STATE_FILE" --id "$task_id"         --out "$out" --out "$RUN/guide.html" --github "$(cfg repo.github)" 2>>"$RUN/logs/guide.log") || { echo "GUIDE=FAILED $res (see logs/guide.log)"; exit 0; }
+  iv=$(isolation_violations); [ -z "$iv" ] || { rm -rf "${LOCAL_DIR:?}/guide"; echo "GUIDE=ISOLATION $iv"; exit 0; }
+  st "guide_file=$(pwd -W 2>/dev/null || pwd)/$out"
+  echo "$res"
   ;;
 park)
   [ "$(git branch --show-current)" = "$branch" ] || { echo "PARK=SKIPPED not on $branch"; exit 0; }

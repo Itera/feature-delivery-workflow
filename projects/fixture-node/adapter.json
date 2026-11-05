@@ -40,7 +40,7 @@
   "merge": { "mode": "human" },
   "models": {
     "test_author": "sonnet", "implementer": "haiku", "tester": "haiku",
-    "reviewer": "sonnet", "validator": "haiku", "reporter": "haiku", "pr_writer": "haiku"
+    "reviewer": "sonnet", "validator": "haiku", "reporter": "haiku", "pr_writer": "haiku", "explainer": "haiku"
   },
   "budget": { "max_attempts": 2, "max_test_fixes": 1, "run_timeout_min": 30, "pause_above_usd": 5 }
 }

@@ -104,7 +104,7 @@
     },
     "models": {
       "type": "object", "additionalProperties": { "enum": ["haiku", "sonnet", "opus"] },
-      "required": ["test_author", "implementer", "tester", "reviewer", "validator", "reporter", "pr_writer"]
+      "required": ["test_author", "implementer", "tester", "reviewer", "validator", "reporter", "pr_writer", "explainer"]
     },
     "budget": {
       "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_test_fixes", "run_timeout_min"],

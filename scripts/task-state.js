@@ -9,6 +9,7 @@
 //       (agents: atomically record verdict, attempt, phase, status and feedback; with "-" the
 //        feedback text is read from stdin, e.g. a quoted heredoc; prints the stored token;
 //        INTENT_ISSUE sets status=needs_human)
+//   task-state.js guide <task_id> -   (explainer: change-guide text as JSON on stdin; see scripts/guide.mjs)
 //   task-state.js list
 //   task-state.js next [max_attempts]   (orchestrator: next eligible intent as JSON, or {action:"done"|"blocked"};
 //                                        status=needs_human intents and their dependents are never picked)
@@ -152,6 +153,27 @@ function main() {
     state.intents[id] = entry;
     writeState(state);
     console.log('PR=STORED');
+    return;
+  }
+
+  if (cmd === 'guide') {
+    // explainer: `guide <task_id> -` with JSON {summary, criteria:[{text,status,how,changes:[{path,symbol,why}],tests:[{path,name,proves}]}],
+    // risks, manual_checks} on stdin. Text only: scripts/guide.mjs computes every link from the real diff.
+    if (!id || rest[0] !== '-') throw new Error('usage: guide <task_id> - (JSON on stdin)');
+    const g = JSON.parse(fs.readFileSync(0, 'utf8'));
+    if (typeof g.summary !== 'string' || !Array.isArray(g.criteria) || !g.criteria.length) throw new Error('guide needs summary and a non-empty criteria list');
+    for (const [i, c] of g.criteria.entries()) {
+      if (typeof c.text !== 'string' || !['met', 'partly', 'not-met'].includes(c.status)) throw new Error(`criteria[${i}] needs text and status met|partly|not-met`);
+      for (const k of ['changes', 'tests']) for (const r of c[k] || []) if (typeof r.path !== 'string') throw new Error(`criteria[${i}].${k} entries need a path`);
+    }
+    const state = readState();
+    state.intents = state.intents || {};
+    const entry = state.intents[id] || { phase: 'pending', status: 'pending', verdicts: {} };
+    entry.guide = { summary: g.summary, criteria: g.criteria, risks: g.risks || [], manual_checks: g.manual_checks || [] };
+    entry.updated_at = new Date().toISOString();
+    state.intents[id] = entry;
+    writeState(state);
+    console.log('GUIDE=STORED');
     return;
   }
 

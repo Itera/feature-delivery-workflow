@@ -60,8 +60,8 @@ if (fs.existsSync(odir)) {
 const agent = (id) => (wf.split(/\n  - id: /).find((b) => b.startsWith(`${id}\n`)) || '');
 const rules = [
   ['acceptance tests are locked for the implementer', /Edit\(.*\)/.test(agent('implementer')) && agent('implementer').includes(`Edit(${adapter.tests.acceptance_glob})`)],
-  ['verifiers are read-only', ['reviewer', 'pr-writer', 'reporter', 'tester'].every((a) => /denied_tools:[^\n]*\bWrite\b[^\n]*\bEdit\b/.test(agent(a)))],
-  ['every agent declares its tool surface', ['test-author', 'tester', 'implementer', 'reviewer', 'validator', 'pr-writer', 'reporter'].every((a) => /allowed_tools:/.test(agent(a)) && /"mcp__\*"/.test(agent(a)))],
+  ['verifiers are read-only', ['reviewer', 'pr-writer', 'explainer', 'reporter', 'tester'].every((a) => /denied_tools:[^\n]*\bWrite\b[^\n]*\bEdit\b/.test(agent(a)))],
+  ['every agent declares its tool surface', ['test-author', 'tester', 'implementer', 'reviewer', 'validator', 'pr-writer', 'explainer', 'reporter'].every((a) => /allowed_tools:/.test(agent(a)) && /"mcp__\*"/.test(agent(a)))],
   ['deterministic gates present', ['lock-tests', 'run-tests', 'gate-test', 'gate-review', 'full-tests', 'gate-validate', 'publish'].every((t) => wf.includes(`- id: ${t}\n`))],
   ['publish only after validation passed', /- id: publish\n[\s\S]*?when: "\$\{tasks\.gate-validate\.output\?\} == PASS"/.test(wf)],
   ['no merge step (human merge)', !/- id: merge\n/.test(wf) || adapter.merge.mode !== 'human'],

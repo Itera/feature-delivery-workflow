@@ -53,6 +53,9 @@ repo=$(cfg repo.path); wt="$(cfg git.worktree_root)/$branch"
 docs_dir=$(cd "$(dirname "$sf")" && git rev-parse --show-toplevel 2>/dev/null); docs_dir=$(plat_path "${docs_dir:-$(dirname "$sf")}")
 run="$FW/runs/$project/$local_id/r$round"
 for p in "$FW" "$sf" "$wt" "$run" "$docs_dir"; do case "$p" in *" "*) die "path with a space (not allowed, spike S7): $p" ;; esac; done
+# A new worktree starts a new round record: records left by an earlier round of the same name (its attempts, base_sha)
+# would otherwise count against this one. They are moved aside, never deleted.
+if [ ! -d "$wt" ] && [ -d "$run" ]; then old="$run.old-$(date +%Y%m%d-%H%M%S)"; mv "$run" "$old" && say "earlier records of this round moved to $old"; fi
 mkdir -p "$run/logs" "$run/scratch"
 # Story input: the tracker snapshot (authoritative what) + the task file (how), combined once per round, then hashed each attempt.
 if [ -n "$spec" ]; then
@@ -162,5 +165,7 @@ done
 [ "$outcome" = EXHAUSTED ] && { ts set "$local_id" status=escalated >/dev/null; say "parking: $(L park 2>&1 | tail -1)"; }
 say "---"; say "story:   $local_id ($sf)"; say "branch:  $branch in $wt"; say "run:     $run"
 say "outcome: $outcome"
+gf=$(ts get "$local_id" guide_file 2>/dev/null)
+if [ -n "$gf" ]; then say "guide:   $gf (local only)"; [ "$(cfg dashboard.open_browser)" != false ] && plat_open "file:///$gf"; fi
 ts get "$local_id" feedback 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{for(const[k,v]of Object.entries(JSON.parse(d)))if(v)console.log(`feedback.${k}: ${String(v).trim().replace(/\s*\n\s*/g," | ").slice(0,300)}`)}catch(e){}})'
 case "$outcome" in PUBLISHED*) exit 0 ;; *) exit 1 ;; esac
