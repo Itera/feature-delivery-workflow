@@ -411,7 +411,7 @@ publish)
   dis=$(git log --format='%an <%ae>%n%B' "origin/$base..HEAD" | grep -inE "$DISCLOSURE_RE" | head -3)
   [ -z "$dis" ] || fail publishing PUBLISH=DISCLOSURE "hidden mode, but a commit contains: $(printf %s "$dis" | paste -sd ' ' -)"
   if [ "$mode" != draft-pr ]; then
-    st phase=published status=pr_ready "commit=$(git rev-parse HEAD)" publish_mode=dry
+    st phase=published status=pr_ready "commit=$(git rev-parse HEAD)" published=dry
     echo "PUBLISH=DRY commit=$(git rev-parse --short HEAD) body=$body"; exit 0
   fi
   git push -q -u origin "HEAD:refs/heads/$branch" || fail publishing PUBLISH=FAILED push
@@ -422,7 +422,7 @@ publish)
   args=(--repo "$(cfg repo.github)" --draft --base "$base" --head "$branch" --title "$title" --body-file "$body")
   while IFS= read -r a; do [ -n "$a" ] && args+=(--assignee "$a"); done < <(cfg publish.assignees)
   url=$(gh pr create "${args[@]}" 2>&1 | tail -1) || fail publishing PUBLISH=FAILED "gh pr create: $url"
-  st phase=published status=pr_open "commit=$(git rev-parse HEAD)" "pr=$url"
+  st phase=published status=pr_open "commit=$(git rev-parse HEAD)" "pr=$url" published=pr
   echo "PUBLISH=PR $url"
   ;;
 park)

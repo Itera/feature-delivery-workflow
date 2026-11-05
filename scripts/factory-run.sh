@@ -106,6 +106,10 @@ while :; do
   # after the run: hooks/config and the story file must be unchanged
   [ "$(L git-meta 2>/dev/null)" = "$meta" ] || { ts set "$local_id" status=needs_human "feedback.engine=GIT_META_CHANGED after the run" >/dev/null; outcome="NEEDS_HUMAN git hooks/config changed"; break; }
   [ "$(git hash-object --no-filters -- "$sf")" = "$story_hash" ] || { ts set "$local_id" status=needs_human "feedback.engine=PLAN_CHANGED: the story file changed during the run" >/dev/null; outcome="NEEDS_HUMAN story file changed"; break; }
+  # The publish step's own record decides, never a later agent's status write.
+  if [ -n "$(ts get "$local_id" published 2>/dev/null)" ]; then
+    ts set "$local_id" status="$( [ "$(ts get "$local_id" published)" = pr ] && echo pr_open || echo pr_ready )" phase=published >/dev/null
+  fi
   status=$(ts get "$local_id" status 2>/dev/null)
   case "$status" in
     pr_ready|pr_open) outcome="PUBLISHED $(ts get "$local_id" pr 2>/dev/null || echo "(dry) $run/pr-body.md")"; break ;;
