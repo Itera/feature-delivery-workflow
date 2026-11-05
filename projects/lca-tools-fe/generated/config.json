@@ -25,7 +25,7 @@
   "commands": {
     "install": "npm ci --no-audit --no-fund",
     "build": "npm run build-dev",
-    "test": "npm test",
+    "test": "npx ng test --watch=false --browsers=ChromeHeadless",
     "lint": "npm run lint"
   },
   "tests": {
