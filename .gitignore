@@ -9,3 +9,4 @@ runs/
 .digital-factory-outputs/
 .claude/settings.local.json
 desktop.ini
+node_modules/

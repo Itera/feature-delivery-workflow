@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://itera.no/delivery-factory/adapter.schema.json",
+  "title": "Delivery factory project adapter (v0)",
+  "description": "Per-project values for the delivery template. Setup only: no project source, story text, domain rules or secrets (PLAN C7). Fixed rules are not parameters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["template_version", "project", "repo", "git", "backlog", "commands", "tests", "publish", "disclosure", "merge", "models", "budget"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "template_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-z0-9.]+)?$" },
+    "project": {
+      "type": "object", "additionalProperties": false, "required": ["id", "stack"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "stack": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "repo": {
+      "type": "object", "additionalProperties": false, "required": ["path", "remote", "github"],
+      "properties": {
+        "path": { "$ref": "#/$defs/nospace_path" },
+        "remote": { "type": "string" },
+        "github": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }
+      }
+    },
+    "git": {
+      "type": "object", "additionalProperties": false,
+      "required": ["base_branch", "story_base", "branch_pattern", "worktree_root", "commit"],
+      "properties": {
+        "base_branch": { "type": "string", "description": "The project's integration branch (where CI rules apply)." },
+        "story_base": { "type": "string", "description": "Branch each story is cut from and its PR targets; default = base_branch. Overridable per run (--base)." },
+        "branch_pattern": { "type": "string", "description": "Placeholders: {local_id} {slug} {round}" },
+        "worktree_root": { "$ref": "#/$defs/nospace_path" },
+        "commit": {
+          "type": "object", "additionalProperties": false, "required": ["subject", "author_name", "author_email"],
+          "properties": {
+            "subject": { "type": "string", "description": "Placeholders: {local_id} {summary}" },
+            "subject_must_match": { "type": "string", "description": "Regex the project's CI enforces on commit subjects." },
+            "author_name": { "type": "string" },
+            "author_email": { "type": "string" }
+          }
+        }
+      }
+    },
+    "backlog": {
+      "type": "object", "additionalProperties": false, "required": ["source", "dir", "local_id_prefix"],
+      "properties": {
+        "source": { "enum": ["task-files"] },
+        "dir": { "$ref": "#/$defs/nospace_path" },
+        "local_id_prefix": { "type": "string" },
+        "criteria_heading": { "type": "string", "default": "Acceptance criteria" }
+      }
+    },
+    "tracker": { "type": ["object", "null"], "description": "Absent or null = no tracker writes." },
+    "companions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["project", "when"],
+        "properties": { "project": { "type": "string" }, "when": { "enum": ["story-produces-docs"] } }
+      }
+    },
+    "commands": {
+      "type": "object", "additionalProperties": false, "required": ["build", "test"],
+      "properties": {
+        "install": { "type": "string" },
+        "build": { "type": "string" },
+        "test": { "type": "string" },
+        "lint": { "type": "string" }
+      }
+    },
+    "tests": {
+      "type": "object", "additionalProperties": false, "required": ["runner", "acceptance_glob", "acceptance_regex"],
+      "properties": {
+        "runner": { "enum": ["dotnet-test", "karma", "vitest", "jest", "node-test", "none"] },
+        "acceptance_glob": { "type": "string", "description": "git pathspec glob of the locked acceptance tests" },
+        "acceptance_regex": { "type": "string", "description": "ERE matching an acceptance test path in a build log" },
+        "acceptance_hint": { "type": "string", "description": "How the test author names files, shown in prompts" },
+        "locked_also": { "type": "array", "items": { "type": "string" }, "description": "Test setup locked with the acceptance tests (pathspecs)" },
+        "contract_errors": { "type": "string", "description": "ERE of build errors that are the implementer's part even inside a test file" }
+      }
+    },
+    "publish": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "gh_account", "assignees", "never_push", "pr_max_words"],
+      "properties": {
+        "mode": { "enum": ["draft-pr", "dry"] },
+        "gh_account": { "type": "string" },
+        "assignees": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "reviewers": { "type": "array", "items": { "type": "string" }, "maxItems": 0, "description": "Pilot: always empty (PLAN C3)" },
+        "never_push": { "type": "array", "items": { "type": "string" } },
+        "pr_max_words": { "type": "integer", "minimum": 50, "maximum": 400 },
+        "pr_sections_extra": { "type": "array", "items": { "type": "string" }, "description": "Extension slot: project-required PR sections" }
+      }
+    },
+    "disclosure": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": { "mode": { "enum": ["hidden", "summary", "full"] } }
+    },
+    "merge": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": { "mode": { "enum": ["human", "after-approval", "auto-low-risk"] } }
+    },
+    "models": {
+      "type": "object", "additionalProperties": { "enum": ["haiku", "sonnet", "opus"] },
+      "required": ["test_author", "implementer", "tester", "reviewer", "validator", "reporter", "pr_writer"]
+    },
+    "budget": {
+      "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_test_fixes", "run_timeout_min"],
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "max_test_fixes": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "run_timeout_min": { "type": "integer", "minimum": 10, "maximum": 480 },
+        "pause_above_usd": { "type": "number" }
+      }
+    },
+    "dashboard": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "open_browser": { "type": "boolean" }, "theme": { "type": "string" }, "port": { "type": "integer" } }
+    }
+  },
+  "$defs": {
+    "nospace_path": { "type": "string", "pattern": "^[^ ]+$", "description": "No spaces: command tasks pass paths unquoted through cmd.exe (spike S7)." }
+  }
+}

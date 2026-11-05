@@ -28,7 +28,9 @@ const ROOT = process.env.PROJECT_ROOT || (() => {
     return cp.execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch (_) { return process.cwd(); }
 })();
-const STATE_FILE = process.env.TASK_STATE_FILE || path.join(ROOT, '.task-state', 'state.json');
+// --state <file> (first two args) wins: the delivery factory keeps state in its run directory, outside the project.
+const STATE_ARG = process.argv[2] === '--state' ? process.argv.splice(2, 2)[1] : '';
+const STATE_FILE = STATE_ARG || process.env.TASK_STATE_FILE || path.join(ROOT, '.task-state', 'state.json');
 
 function readState() {
   try {
@@ -133,6 +135,23 @@ function main() {
     const back = getPath((readState().intents || {})[id], `verdicts.${role}`);
     if (back !== token) throw new Error(`read-back mismatch: stored ${back}, expected ${token}`);
     console.log(token);
+    return;
+  }
+
+  if (cmd === 'pr') {
+    // pr-writer: `pr <task_id> -` with JSON {title, summary, body} on stdin. The publish gate checks it (disclosure, length).
+    if (!id || rest[0] !== '-') throw new Error('usage: pr <task_id> - (JSON {title, summary, body} on stdin)');
+    const pr = JSON.parse(fs.readFileSync(0, 'utf8'));
+    for (const k of ['title', 'summary', 'body']) if (typeof pr[k] !== 'string' || !pr[k].trim()) throw new Error(`pr.${k} missing`);
+    if (/[\r\n]/.test(pr.title + pr.summary)) throw new Error('title and summary must be one line');
+    const state = readState();
+    state.intents = state.intents || {};
+    const entry = state.intents[id] || { phase: 'pending', status: 'pending', verdicts: {} };
+    entry.pr = { title: pr.title.trim(), summary: pr.summary.trim(), body: pr.body.trim() + '\n' };
+    entry.updated_at = new Date().toISOString();
+    state.intents[id] = entry;
+    writeState(state);
+    console.log('PR=STORED');
     return;
   }
 

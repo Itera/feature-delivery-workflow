@@ -1,0 +1,61 @@
+{
+  "$schema": "../../schemas/adapter.schema.json",
+  "template_version": "0.0.0-inc0",
+  "project": { "id": "lca-tools-fe", "stack": ["angular19", "typescript", "karma", "jasmine", "eslint"] },
+  "repo": {
+    "path": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-fe",
+    "remote": "origin",
+    "github": "LCATools/lca-tools-fe"
+  },
+  "git": {
+    "base_branch": "develop",
+    "story_base": "LCA-3389-fe-npm-test",
+    "branch_pattern": "{local_id}-{slug}-r{round}",
+    "worktree_root": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-fe-worktrees",
+    "commit": {
+      "subject": "LCA-3300: {local_id} {summary}",
+      "subject_must_match": "^LCA-[0-9]+:[[:space:]]*[^[:space:]]",
+      "author_name": "Michal Matovcik",
+      "author_email": "michal@lca.no"
+    }
+  },
+  "backlog": {
+    "source": "task-files",
+    "dir": "C:/Users/michal.matovcik/Work/LCA/lca-tools/lca-tools-docs/docs/features/product-analysis/tasks",
+    "local_id_prefix": "PA-",
+    "criteria_heading": "Acceptance criteria"
+  },
+  "tracker": null,
+  "companions": [{ "project": "lca-tools-docs", "when": "story-produces-docs" }],
+  "commands": {
+    "install": "npm ci --no-audit --no-fund",
+    "build": "npm run build-dev",
+    "test": "npm test",
+    "lint": "npm run lint"
+  },
+  "tests": {
+    "runner": "karma",
+    "acceptance_glob": "src/**/*.acceptance.spec.ts",
+    "acceptance_regex": "\\.acceptance\\.spec\\.ts",
+    "acceptance_hint": "<name>.acceptance.spec.ts next to the code it tests",
+    "locked_also": ["karma.conf.js", "tsconfig.spec.json", "angular.json", "src/test.ts", ".eslintrc.json"],
+    "contract_errors": "TS2305|TS2307|TS2339|TS2551|TS2614|TS2724|Cannot find module|has no exported member"
+  },
+  "publish": {
+    "mode": "draft-pr",
+    "gh_account": "michal-matovcik-lca",
+    "assignees": ["michal-matovcik-lca"],
+    "reviewers": [],
+    "never_push": ["develop", "staging", "pre-staging", "master", "main"],
+    "pr_max_words": 250,
+    "pr_sections_extra": ["review-checklist"]
+  },
+  "disclosure": { "mode": "hidden" },
+  "merge": { "mode": "human" },
+  "models": {
+    "test_author": "sonnet", "implementer": "sonnet", "tester": "haiku",
+    "reviewer": "opus", "validator": "sonnet", "reporter": "haiku", "pr_writer": "haiku"
+  },
+  "budget": { "max_attempts": 3, "max_test_fixes": 2, "run_timeout_min": 120, "pause_above_usd": 30 },
+  "dashboard": { "open_browser": true, "theme": "lemmings", "port": 4777 }
+}
