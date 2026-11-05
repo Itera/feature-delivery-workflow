@@ -74,6 +74,7 @@ if (broken.length) die(`fixed rules violated after overrides: ${broken.join('; '
 const config = {
   project: adapter.project, repo: { github: adapter.repo.github }, git: { story_base: adapter.git.story_base, local_dir: adapter.git.local_dir || '.itera', commit: adapter.git.commit },
   commands: adapter.commands, tests: adapter.tests, publish: adapter.publish, disclosure: adapter.disclosure,
+  platform: { os: (adapter.platform && adapter.platform.os) || '' },
 };
 const commit = (() => { try { return execFileSync('git', ['-C', ROOT, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch { return 'unknown'; } })();
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 12);

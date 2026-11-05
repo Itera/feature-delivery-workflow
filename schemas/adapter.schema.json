@@ -115,6 +115,15 @@
         "pause_above_usd": { "type": "number" }
       }
     },
+    "platform": {
+      "type": "object", "additionalProperties": false,
+      "description": "OS-specific values; every field is optional and detected when absent (scripts/platform.sh). Windows (Git Bash) is the default.",
+      "properties": {
+        "os": { "enum": ["windows", "macos", "linux"], "description": "Default: detected from uname." },
+        "df_bin": { "$ref": "#/$defs/nospace_path", "description": "digital-factory engine binary. Default: $DF_BIN, then PATH, then ~/.digital-factory/." },
+        "open_cmd": { "type": "string", "description": "Command that opens a URL. Default: explorer.exe (windows), open (macos), xdg-open (linux)." }
+      }
+    },
     "dashboard": {
       "type": "object", "additionalProperties": false,
       "properties": { "open_browser": { "type": "boolean" }, "theme": { "type": "string" }, "port": { "type": "integer" } }

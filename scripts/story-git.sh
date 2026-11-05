@@ -44,6 +44,7 @@ st() { ts set "$task_id" "$@" >/dev/null 2>&1 || true; }
 fail() { st "phase=$1" status=failed "feedback.engine=$2: $3"; echo "$2 $3"; exit 1; }
 CFG_JSON=$(fshow "projects/$PROJECT/generated/config.json") || { echo "no trusted config for $PROJECT at $TRUST" >&2; exit 1; }
 cfg() { printf %s "$CFG_JSON" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{let v=JSON.parse(d);for(const k of process.argv[1].split("."))v=v==null?v:v[k];if(Array.isArray(v))v=v.join("\n");process.stdout.write(v==null?"":String(v))})' "$1"; }
+PLAT_OS=$(cfg platform.os); eval "$(fshow scripts/platform.sh)" || { echo "no trusted platform.sh at $TRUST" >&2; exit 1; }
 ACCEPT=":(glob)$(cfg tests.acceptance_glob)"
 ACCEPT_RE=$(cfg tests.acceptance_regex)
 CONTRACT_ERRORS=$(cfg tests.contract_errors)
@@ -99,15 +100,14 @@ tree_fingerprint() {
 }
 
 # Stop processes an agent recorded in <run>/pids-* and left running (dev servers after a validator crash).
-# Windows: taskkill on the Windows PID the agent recorded; only PIDs whose image is node/dotnet are touched.
+# The OS-specific part is plat_kill_pid (scripts/platform.sh, from the factory commit): only node/dotnet/project images.
 kill_recorded() {
-  local f pid n=0 img
+  local f pid n=0
   for f in $1; do
     [ -f "$f" ] || continue
     while IFS= read -r pid || [ -n "$pid" ]; do
       pid=$(printf %s "$pid" | tr -cd 0-9); [ -n "$pid" ] && [ "$pid" -gt 4 ] || continue
-      img=$(tasklist.exe //FI "PID eq $pid" //NH //FO CSV 2>/dev/null | head -1 | cut -d, -f1 | tr -d '"')
-      case "$img" in node.exe|dotnet.exe|LCA.*.exe) taskkill.exe //PID "$pid" //T //F >/dev/null 2>&1 && n=$((n + 1)) ;; esac
+      plat_kill_pid "$pid" && n=$((n + 1))
     done < "$f"
     rm -f "$f"
   done

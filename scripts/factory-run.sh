@@ -13,8 +13,6 @@
 # Nothing is written to the project except the story's own changes; run records stay in runs/ (gitignored).
 set -uo pipefail
 F=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-FW=$(cygpath -m "$F" 2>/dev/null || echo "$F")
-DF_BIN=${DF_BIN:-/c/Users/michal.matovcik/Work/LCA/.digital-factory/digital-factory.exe}
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { say "STOP: $*"; exit 1; }
 
@@ -26,6 +24,11 @@ while [ $# -gt 0 ]; do case "$1" in
   *) die "unknown option $1" ;; esac; done
 case "$publish" in dry|draft-pr) ;; *) die "--publish dry|draft-pr" ;; esac
 A="$F/projects/$project/adapter.json"; [ -f "$A" ] || die "no adapter for $project"
+# Platform layer (scripts/platform.sh): the adapter's platform block wins over detection.
+PLAT_OS=$(node -e 'const p=require(process.argv[1]).platform||{};process.stdout.write(p.os||"")' "$A")
+PLAT_OPEN_CMD=$(node -e 'const p=require(process.argv[1]).platform||{};process.stdout.write(p.open_cmd||"")' "$A")
+. "$F/scripts/platform.sh"
+FW=$(plat_path "$F")
 # {factory} in adapter values = this factory checkout (fixtures live under its runs/).
 cfg() { node -e 'const a=require(process.argv[1]);let v=a;for(const k of process.argv[2].split("."))v=v==null?v:v[k];process.stdout.write(v==null?"":String(v).split("{factory}").join(process.argv[3]))' "$A" "$1" "$FW"; }
 
@@ -34,19 +37,20 @@ cfg() { node -e 'const a=require(process.argv[1]);let v=a;for(const k of process
   || die "factory template or projects/$project has uncommitted changes; commit them (the gates run the committed copy)"
 node "$F/scripts/render.mjs" "$project" --check >/dev/null || die "projects/$project/generated drifts from a fresh render; run render.mjs and commit"
 trust=$(git -C "$F" rev-parse HEAD)
+DF_BIN=$(plat_df_bin "$(cfg platform.df_bin)") || die "digital-factory engine not found (set DF_BIN or the adapter's platform.df_bin)"
 # The agents' state CLI: the trusted task-state.js (gates never use this copy; they read the commit).
 mkdir -p "$F/runs/.cli" && git -C "$F" show "$trust:scripts/task-state.js" > "$F/runs/.cli/task-state.js" || die "cannot stage the state CLI"
 
 # 2 · story and branch
 dir=$(cfg backlog.dir); sf=$(ls "$dir"/"$story"-*.md 2>/dev/null | head -1); [ -n "$sf" ] || die "no task file $story-*.md in $dir"
-sf=$(cygpath -m "$sf" 2>/dev/null || echo "$sf")
+sf=$(plat_path "$sf")
 local_id=${id:-"$(cfg backlog.local_id_prefix)$story"}
 [ -z "$spec" ] || [ -f "$spec" ] || die "no spec snapshot at $spec"
 slug=$(basename "$sf" .md); slug=${slug#"$story"-}
 base=${base:-$(cfg git.story_base)}
 branch=$(cfg git.branch_pattern); branch=${branch//\{local_id\}/$local_id}; branch=${branch//\{slug\}/$slug}; branch=${branch//\{round\}/$round}
 repo=$(cfg repo.path); wt="$(cfg git.worktree_root)/$branch"
-docs_dir=$(cd "$(dirname "$sf")" && git rev-parse --show-toplevel 2>/dev/null); docs_dir=$(cygpath -m "${docs_dir:-$(dirname "$sf")}" 2>/dev/null || echo "$docs_dir")
+docs_dir=$(cd "$(dirname "$sf")" && git rev-parse --show-toplevel 2>/dev/null); docs_dir=$(plat_path "${docs_dir:-$(dirname "$sf")}")
 run="$FW/runs/$project/$local_id/r$round"
 for p in "$FW" "$sf" "$wt" "$run" "$docs_dir"; do case "$p" in *" "*) die "path with a space (not allowed, spike S7): $p" ;; esac; done
 mkdir -p "$run/logs" "$run/scratch"
@@ -83,18 +87,30 @@ L() { git -C "$F" show "$trust:scripts/launch.sh" | sh -s -- "$FW" "$trust" "${m
 ts() { node "$F/scripts/task-state.js" --state "$run/state.json" "$@"; }
 ts set "$local_id" "local_id=$local_id" "story_file=$sf" "branch=$branch" "base=$base" "round=$round" "trust=$trust" >/dev/null
 
-# 2b · live board: Peter's dashboard in runs mode on this round's attempt logs (spec 2.5). Theme is remembered per port.
-board="$run/board"; mkdir -p "$board"
+# 2b · live board: one shared dashboard server per factory checkout, on the adapter's fixed port (so the theme, which the
+# page remembers per port, stays on), in runs mode on runs/.board/. Every attempt writes its engine log there as
+# delivery@<YYYYMMDD-HHMMSS>.log (the only name runs mode lists); the page follows the newest. The server is restarted
+# only when it serves another project's workflow. Board servers of earlier per-round boards are stopped.
+board="$F/runs/.board"; mkdir -p "$board"
+wf_board="$F/projects/$project/generated/delivery.yaml"
+for p in "$F"/runs/*/*/r*/board/server.pid; do
+  [ -f "$p" ] || continue; kill "$(cat "$p")" 2>/dev/null && say "board: stopped an earlier per-round board ($(dirname "$p"))"; rm -f "$p"
+done
 if [ "$(cfg dashboard.open_browser)" != false ]; then
-  port=$(cfg dashboard.port); port=${port:-4777}
-  if [ -f "$board/url" ] && curl -s -o /dev/null "$(cat "$board/url")api/snapshot"; then
-    say "board: $(cat "$board/url") (already running)"
+  port=$(cfg dashboard.port); port=${port:-4777}; url="http://localhost:$port/"
+  up() { curl -s -o /dev/null "${url}api/snapshot"; }
+  if up && [ -f "$board/server.pid" ] && [ "$(cat "$board/server.workflow" 2>/dev/null)" = "$wf_board" ]; then
+    say "board: $url (shared, already running)"
   else
-    while curl -s -o /dev/null "http://127.0.0.1:$port/"; do port=$((port + 1)); done
-    ( cd "$F/dashboard" && nohup node server.js --workflow "$F/projects/$project/generated/delivery.yaml" --runs "$board" --port "$port"         >"$board/server.log" 2>&1 & echo $! > "$board/server.pid" )
-    echo "http://localhost:$port/" > "$board/url"; sleep 2
-    say "board: http://localhost:$port/ (Lemmings: the button at top right, remembered for this port)"
-    explorer.exe "http://localhost:$port/" >/dev/null 2>&1 || true   # opens the default browser (exit code is always 1)
+    if [ -f "$board/server.pid" ]; then kill "$(cat "$board/server.pid")" 2>/dev/null; rm -f "$board/server.pid"; sleep 1; fi
+    if up; then
+      say "board: port $port is taken by something else; no board (set dashboard.port)"
+    else
+      ( cd "$F/dashboard" && nohup node server.js --workflow "$wf_board" --runs "$board" --port "$port" >"$board/server.log" 2>&1 & echo $! > "$board/server.pid" )
+      echo "$wf_board" > "$board/server.workflow"; sleep 2
+      say "board: $url (Lemmings: the button at top right, remembered for this port)"
+      plat_open "$url"
+    fi
   fi
 fi
 
@@ -113,14 +129,15 @@ while :; do
   cp "$sf" "$a/story-before.md"
   pre=run; [ -n "$(ts get "$local_id" base_sha 2>/dev/null)" ] && pre=skip
   say "[$local_id #$n, counted $counted/$max] DF run (preflight=$pre, publish=$publish) → $a"
-  ( cd "$a" && timeout "$((tmo * 60 + 300))" "$DF_BIN" workflow run --allow-cross-directory -o "$a/report.json" \
+  blog="$board/delivery@$(date +%Y%m%d-%H%M%S).log"; echo "$blog" > "$a/board-log"
+  ( cd "$a" && plat_timeout "$((tmo * 60 + 300))" "$DF_BIN" workflow run --allow-cross-directory -o "$a/report.json" \
       --set "factory=$FW" --set "trust=$trust" --set "run_dir=$run" --set "repo_path=$wt" \
       --set "task_id=$local_id" --set "local_id=$local_id" --set "branch=$branch" --set "base_branch=$base" \
       --set "attempt=$n" --set "git_meta=$meta" --set "story_file=$sf" --set "story_hash=$story_hash" \
       --set "docs_dir=$docs_dir" --set "preflight=$pre" --set "publish_mode=$publish" \
       --set "state_cli=node $FW/runs/.cli/task-state.js --state $run/state.json" --set "scratch_dir=$wt/$ld/scratch" \
-      delivery.yaml </dev/null >"$board/a$n.log" 2>&1 ); rc=$?
-  cp "$board/a$n.log" "$a/df.log" 2>/dev/null
+      delivery.yaml </dev/null >"$blog" 2>&1 ); rc=$?
+  cp "$blog" "$a/df.log" 2>/dev/null
   say "[$local_id #$n] engine exit $rc"
   # after the run: hooks/config and the story file must be unchanged
   [ "$(L git-meta 2>/dev/null)" = "$meta" ] || { ts set "$local_id" status=needs_human "feedback.engine=GIT_META_CHANGED after the run" >/dev/null; outcome="NEEDS_HUMAN git hooks/config changed"; break; }
