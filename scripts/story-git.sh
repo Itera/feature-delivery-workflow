@@ -50,6 +50,7 @@ CONTRACT_ERRORS=$(cfg tests.contract_errors)
 mapfile -t SETUP_CFG < <(cfg tests.locked_also | sed 's#^\([^:]\)#:(glob)\1#')
 # Paths that belong to the factory or the engine. None of them may ever be committed to the project (PLAN C1).
 FACTORY_PATHS=(.digital-factory .digital-factory-outputs .task-state .factory .intent-loop .code-compass .copilot-cache)
+LOCAL_DIR=$(cfg git.local_dir); LOCAL_DIR=${LOCAL_DIR:-.itera}
 has_origin() { git remote get-url origin >/dev/null 2>&1; }
 
 plan_hash() {
@@ -142,12 +143,18 @@ setup_hash() {
 }
 # Factory or engine files in the project worktree: changed vs the story base, staged, or untracked (also ignored ones).
 # Prints them space-separated; empty = clean. (Replaces protected_changes: the loop's own files are not in the project.)
+# The one allowed local folder is $LOCAL_DIR (.itera/), which the project ignores (setup PR). It may exist untracked and
+# ignored, but never committed or staged, and it must really be ignored. Any other factory path anywhere is a violation.
 isolation_violations() {
-  local -a ps=()
+  local -a ps=() ls=(":(glob)$LOCAL_DIR/**")
   local p
   for p in "${FACTORY_PATHS[@]}"; do ps+=(":(glob)$p" ":(glob)$p/**" ":(glob)**/$p/**"); done
-  # TODO(human): list every path in the project worktree that matches ps — committed on the branch since the story
-  # base, staged, untracked, and untracked-but-ignored — one per line, sorted and unique, then `paste -sd ' ' -`.
+  {
+    git diff --name-only "origin/$base" -- "${ps[@]}" "${ls[@]}"      # committed on the branch
+    git diff --cached --name-only -- "${ps[@]}" "${ls[@]}"            # staged
+    git ls-files -o -- "${ps[@]}"                                     # untracked, ignored ones included
+    [ -e "$LOCAL_DIR" ] && ! git check-ignore -q "$LOCAL_DIR/x" && echo "$LOCAL_DIR/(not-ignored)"
+  } 2>/dev/null | sort -u | paste -sd ' ' -
 }
 sensitive_staged() {
   git diff --cached --name-only \

@@ -55,6 +55,9 @@ else
   say "reusing worktree $wt"
 fi
 [ "$(git -C "$wt" branch --show-current)" = "$branch" ] || die "worktree $wt is not on $branch"
+ld=$(cfg git.local_dir); ld=${ld:-.itera}
+git -C "$wt" check-ignore -q "$ld/x" || die "$ld/ is not ignored on $base; the story base must contain the setup commit"
+mkdir -p "$wt/$ld/scratch"
 
 L() { git -C "$F" show "$trust:scripts/launch.sh" | sh -s -- "$FW" "$trust" "${meta:--}" "$project" "$run" "$wt" "$@" "$local_id" "$branch" "$base"; }
 ts() { node "$F/scripts/task-state.js" --state "$run/state.json" "$@"; }
@@ -80,7 +83,7 @@ while :; do
       --set "task_id=$local_id" --set "local_id=$local_id" --set "branch=$branch" --set "base_branch=$base" \
       --set "attempt=$n" --set "git_meta=$meta" --set "story_file=$sf" --set "story_hash=$story_hash" \
       --set "docs_dir=$docs_dir" --set "preflight=$pre" --set "publish_mode=$publish" \
-      --set "state_cli=node $FW/runs/.cli/task-state.js --state $run/state.json" --set "scratch_dir=$run/scratch" \
+      --set "state_cli=node $FW/runs/.cli/task-state.js --state $run/state.json" --set "scratch_dir=$wt/$ld/scratch" \
       delivery.yaml </dev/null >"$a/df.log" 2>&1 ); rc=$?
   say "[$local_id #$n] engine exit $rc"
   # after the run: hooks/config and the story file must be unchanged

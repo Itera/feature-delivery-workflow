@@ -13,7 +13,8 @@
     "github": "LCATools/lca-tools-fe"
   },
   "git": {
-    "story_base": "LCA-3389-fe-npm-test",
+    "story_base": "LCA-3300-itera-local-folder",
+    "local_dir": ".itera",
     "commit": {
       "subject": "LCA-3300: {local_id} {summary}",
       "subject_must_match": "^LCA-[0-9]+:[[:space:]]*[^[:space:]]",

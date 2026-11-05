@@ -12,7 +12,8 @@
     "github": "LCATools/lca-tools-be"
   },
   "git": {
-    "story_base": "LCA-2405-agent-docs-pointers",
+    "story_base": "LCA-3300-itera-local-folder",
+    "local_dir": ".itera",
     "commit": {
       "subject": "LCA-3300: {local_id} {summary}",
       "subject_must_match": "^LCA-[0-9]+:[[:space:]]*[^[:space:]]",

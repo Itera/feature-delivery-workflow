@@ -31,6 +31,7 @@
         "base_branch": { "type": "string", "description": "The project's integration branch (where CI rules apply)." },
         "story_base": { "type": "string", "description": "Branch each story is cut from and its PR targets; default = base_branch. Overridable per run (--base)." },
         "branch_pattern": { "type": "string", "description": "Placeholders: {local_id} {slug} {round}" },
+        "local_dir": { "type": "string", "pattern": "^[.][a-z0-9-]+$", "description": "The one folder the factory may use inside a project worktree; the project ignores it (setup PR), it is never committed." },
         "worktree_root": { "$ref": "#/$defs/nospace_path" },
         "commit": {
           "type": "object", "additionalProperties": false, "required": ["subject", "author_name", "author_email"],
