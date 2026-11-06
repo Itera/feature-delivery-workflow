@@ -256,6 +256,8 @@ The workflow itself: flow, triage, code intelligence, checks, state machine, the
 
 This is Peter's `sdlc.yaml`, with stages as the dashboard shows them. The story from Specify isn't treated as final. **Triage** scores its technical complexity and picks a route: **A** one builder, **B** a skeleton plus parallel small-model workers, or **C** sequential slices inside the same run. **Any split stays inside the workflow.** The driver, Jira and the reviewer still see one story, one state and one PR. Delivery may **split** the work as it likes, but may not **reinterpret** it. Every acceptance criterion must still be covered unchanged. A story whose criteria are wrong or contradictory ends as `INTENT_ISSUE` and goes back to Specify.
 
+Before any test or code, triage also writes the **technical plan** (section 2.2): how this stack wires the change, which library behaviour was verified, and at which level each criterion is tested. A script lints it and a fresh reviewer approves it. The acceptance tests are then checked twice before they are locked: a **red check** (they must fail on the untouched code) and a **test review** against the story and the plan, including whether the test fixtures wire things the way the real host does. Every attempt also **starts the real app**. These three were added after an escaped defect in the increment 0 pilot ([ADR-0003](docs/adr/0003-right-first-time-before-control-plane.md)).
+
 ```mermaid
 flowchart TD
   IN[/"Approved story from Specifytask file + acceptance criteria + Jira key"/]
@@ -265,13 +267,15 @@ flowchart TD
   end
   subgraph S2["Triage + decompose"]
     TR["triage · Opusimpact from Code Compass AND a cross-check(ripgrep, compiler references, git co-change)criteria, layers, risk tags · route · internal plan"]
-    RG{{"plan gate · scriptplan schema · each criterion coveredsubtasks own disjoint files"}}
+    RG{{"plan gate · script lint + fresh plan reviewer (Opus)technical plan: wiring + lifetimes, library facts (spike-verified),test level per criterion · plan schema · each criterion coveredsubtasks own disjoint files"}}
     SK["skeleton · Opus · route B onlyinterfaces, DTOs, stubs, wiringcommitted before tests and workers"]
   end
   SL[["route C · internal slices, in ordereach slice: route A or B + test gatenext slice builds on the previous one"]]
   subgraph S3["Acceptance tests"]
     WT["write-tests · Sonnetuser-view tests from the criteria"]
     STT["security-contract tests · Haikufilled from the endpoint template"]
+    RD{{"red check · scriptacceptance tests on the untouched codeall pass = they prove nothing"}}
+    TQ["test review · Opus, fresh, no code yetcoverage per criterion, assertion strength,fixture fidelity vs the real host"]
     LK{{"lock-tests · hash tests + build scripts"}}
   end
   subgraph S4["Implement: route from triage"]
@@ -280,7 +284,7 @@ flowchart TD
     IG{{"integrate · scriptmerge worker branchesownership check · conflicts → Sonnet"}}
   end
   subgraph S5["Test + security gate"]
-    RT{{"build-and-run-testsbuild -warnaserror · unit · acceptancearch tests · tenancy ratchet · golden master"}}
+    RT{{"build-and-run-testsbuild -warnaserror · unit · acceptance · boot the real hostarch tests · tenancy ratchet · golden master"}}
     SC{{"security-scan · changed codesecrets · SAST · new findings only"}}
     HV{{"deep checks · once tests are GREENmutation on changed files · Sonar new-code gatedependency + licence check if lock files changed"}}
     SF["summarise-failure · Haiku"]
@@ -311,7 +315,8 @@ flowchart TD
   RG -- "route A" --> WT & STT
   RG -- "route B" --> SK --> WT & STT
   RG -- "route C" --> SL --> WT & STT
-  WT & STT --> LK
+  WT & STT --> RD --> TQ --> LK
+  TQ -. "revise once" .-> WT
   LK -- "route A" --> IM --> RT
   LK -- "route B" --> WK --> IG --> RT
   RT --> SC --> GT
@@ -334,8 +339,8 @@ flowchart TD
   classDef io fill:#EEEDE4,stroke:#000000,color:#000000
   class WT,IM,SF,RP agent
   class VA verify
-  class BR,SN,LK,RT,GT,SR,GR,GV,RG,IG,HV gate
-  class TR,SK,SC,RV1,RV2,RV3,RV4,AD,PR,CM,SL newnode
+  class BR,SN,LK,RT,GT,SR,GR,GV,RG,IG,HV,RD gate
+  class TR,SK,SC,RV1,RV2,RV3,RV4,AD,PR,CM,SL,TQ newnode
   class SW,STT,WK swarm
   class HG human
   class IN io
@@ -354,6 +359,20 @@ Specify splits the work by function. Triage splits it technically, sized for the
 | Acceptance criteria | Task file | Groups of criteria that don't depend on each other → B or C |
 | A golden path exists | `docs/golden-paths/` recipe matches the change | Mechanical → Haiku worker |
 | Risk tags | Tenancy, auth, calculations, schema, concurrency | That subtask goes to Sonnet with an advisor and is never parallelised with code it touches |
+
+### The technical plan
+
+Stories and architecture documents say *what* to build. The plan says *how, in this stack*, and it is written and checked before the first test. It is the contract for the test author, the builders and the reviewers; deviating from it needs a recorded `PLAN_DEVIATION`.
+
+| Section | Content | Checked by |
+| --- | --- | --- |
+| Change map | Files and types to add or change, each with an existing file in the repo that shows the convention | Plan reviewer |
+| Wiring | Every registration with its lifetime and why, **including types a library registers for you**; configuration sections; middleware or interceptor order | Lint (every row has a lifetime) + plan reviewer + boot check |
+| Library facts | Versions (pinned) and the APIs used, each marked `verified: spike, docs or source` or `ASSUMPTION` | Lint (no `ASSUMPTION` on a wiring row) + plan reviewer |
+| Test strategy | Per criterion: unit, real host or live probe; the fixture; **what must not be faked** | Lint (every criterion has a row) + test review |
+| Risks | Each risk with the check that covers it | Plan reviewer |
+
+The planner may **spike**: small throwaway programs in a scratch folder outside the project, for example a container with scope validation to see the lifetime a library uses. The rules it applies come from the project's **stack packs** (`stacks/<stack>.md`, selected by the adapter): generic, reusable checklists per technology that the planner, the plan reviewer, the test reviewer and the code reviewer all read. An approved plan is kept across attempts; a changed story invalidates it.
 
 ### Route A · one builder
 
@@ -406,7 +425,8 @@ Checks are a **registry in the project adapter**, not steps written into the wor
 | Stage | Checks | Why there |
 | --- | --- | --- |
 | Preflight (base branch) | Build + tests green on the base branch (cached by commit); tools reachable; **baseline snapshot** of linter, Sonar and dependency findings | A red base branch isn't the story's fault. The baseline lets later gates block only on **new** issues, so legacy debt never stalls a story. |
-| Red gate | Compile + run the locked acceptance tests: they must fail | Proves the tests test something. |
+| Red gate | Compile + run the acceptance tests on the untouched code, before the test review and the lock: they must fail | Proves the tests test something. Tests that pass are listed for the test reviewer. |
+| Boot (every attempt, after the tests) | Start the real app from the adapter's `commands.boot`; it must log its ready line. Also run in preflight on the base | Unit tests build classes by hand and never see the host's wiring (lifetimes, configuration binding, startup code). |
 | Inside the builder (advisory) | Incremental build, unit tests of the touched project, formatter, linter on changed files | Fast feedback inside the agent's loop. Not trusted, because the gate re-runs everything. |
 | Test gate (every attempt) | Format check → auto-fix → linters → build (warnings as errors) → unit → integration + acceptance → arch tests, ratchets, golden master → coverage of changed lines | Authoritative, and ordered so it fails fast. Cheap enough to run on every attempt. |
 | Security scan (every attempt) | Secret scan and SAST on the change, compared with the base branch by fingerprint | Fast. Only findings the story introduced block (section 2.7). |
@@ -714,6 +734,30 @@ FIXED
 
 FIXED
 
+### A reviewed technical plan comes before tests and code
+
+**Why:** Stories describe behaviour. Without a stack-specific plan (wiring, verified library behaviour, test level per criterion), the test author and the builder each guess, and the gates only check what they guessed.
+
+FIXED
+
+### Tests are reviewed before they are locked, and must fail first
+
+**Why:** The deterministic gates trust the tests completely. A test that passes on the untouched code, or a fixture that wires things differently from the real host, makes a defect invisible instead of catching it.
+
+FIXED
+
+### Something starts the real host on every attempt
+
+**Why:** Wiring defects (lifetimes, configuration, startup code) pass every unit test. Only the running host shows them.
+
+FIXED
+
+### Every escaped defect changes the factory
+
+**Why:** A defect found after the gates names the layer that should have caught it. It becomes a deterministic gate where possible, otherwise a stack-pack rule, and always a seeded-defect fixture the eval must catch from then on.
+
+FIXED
+
 ### Deterministic gates decide; model verdicts only advise
 
 **Why:** A script gives the same answer every time and can't be talked round.
@@ -1012,11 +1056,11 @@ flowchart LR
 | --- | --- | --- | --- |
 | Unit | State transitions (including property tests), adapter schema, tracker mapping, ownership check, metrics maths | none | every commit |
 | Workflow contract | Test variants of the workflows where agents are fake scripts acting out cases: a builder that edits a locked test is rejected, a reviewer that changes code is caught, an empty worker slot is skipped | none | every commit |
-| Eval | Fixture repo with \~10 reference stories and seeded-defect branches. Scores pass rate, defects caught, false findings, cost and time. | real | nightly, and on any prompt or model change |
+| Eval | Fixture repo with \~10 reference stories and seeded-defect branches (the first gate-level ones come in increment 1, one per escaped defect). Scores pass rate, defects caught, false findings, cost and time. | real | nightly, and on any prompt or model change |
 
 ## 4.5 · Increments
 
-Each increment is usable on real stories. **One workflow first, four from increment 2:** increment 0 keeps Peter's single workflow, already grouped into the four stages, with each stage's inputs and outputs explicit in the state file. The split happens once the typed control plane (increment 1) can hold the trust snapshots outside agents' reach, because today they live safely in the engine's memory and must not become files an agent could edit. Everything from increment 2 on sits behind an adapter flag, so a feature that doesn't pay for itself can be switched off. Select an increment:
+Each increment is usable on real stories. **One workflow first, four from increment 2:** increment 0 keeps Peter's single workflow, already grouped into the four stages, with each stage's inputs and outputs explicit in the state file. Increment 1 makes that single workflow right first time ([ADR-0003](docs/adr/0003-right-first-time-before-control-plane.md): increments are ordered by what blocks real use). The split happens once the typed control plane (increment 2) can hold the trust snapshots outside agents' reach, because today they live safely in the engine's memory and must not become files an agent could edit. Everything from increment 2 on sits behind an adapter flag, so a feature that doesn't pay for itself can be switched off. Select an increment:
 
 ### Increment 0 · Fork and run
 
@@ -1031,27 +1075,32 @@ Each increment is usable on real stories. **One workflow first, four from increm
 - 3 real stories reach a PR
 - You would merge at least 2 without rework
 
-### Increment 1 · Typed control plane
+### Increment 1 · Right first time
 
-- Move the bash and JS control logic into one TypeScript CLI
-- Tests that check it behaves exactly like Peter's scripts
-- Unit and workflow-contract tests in CI
+- Technical plan in triage (route A only): planner with spikes, plan lint, fresh plan reviewer, plan kept across attempts
+- Red check and test review before the lock, with one revision loop
+- Boot the real host in preflight and on every attempt; the validator may not pass an endpoint on tests alone
+- Stack packs (.NET first), read by planner, plan reviewer, test reviewer and reviewer; the reviewer checks the code against the plan
+- Mutation testing on changed files as an advisory report to the reviewer
+- First seeded-defect fixtures (gate level), starting with the defect that escaped increment 0
 
 ### Done when
 
-- Same results on recorded runs
-- No bash beyond thin wrappers
+- Every seeded defect is caught by the gate meant for it
+- The backend pilot story that escaped in increment 0 reaches a PR that starts and that you would merge without rework
+- The frontend pilot baseline reaches publish
 
-### Increment 2 · Quality bar
+### Increment 2 · Typed control plane + quality bar
 
+- Move the bash and JS control logic into one TypeScript CLI, with tests that check it behaves exactly like the recorded runs
 - Split into prepare / build / verify / publish workflows
-- 4 Opus review lenses, security scan, deep checks
+- 4 Opus review lenses, security scan, deep checks with blocking thresholds
 - Check registry and Itera security standard v0
 
 ### Done when
 
-- The seeded-defect set is caught at the agreed rate
-- No gate ever passes a planted defect
+- Same results on recorded runs; no bash beyond thin wrappers
+- The seeded-defect set is caught at the agreed rate; no gate ever passes a planted defect
 
 ### Increment 3 · Measure
 

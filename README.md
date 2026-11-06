@@ -19,7 +19,17 @@ The factory runs **outside** the project it works on: nothing of it is committed
 Each increment gets its own worktree (`worktrees/inc-N`, gitignored), branched from the previous one, and ends with a tag
 `inc-N-done` plus `docs/evidence/inc-N*.md`. Compare states with `git diff inc-0-done inc-1-done`.
 
-## Continue here: what is missing in increment 0
+## Increment 0: closed (2026-11-06)
+
+Evidence: [docs/evidence/inc-0.md](docs/evidence/inc-0.md). A backend pilot story passed every gate and did not start; the
+process answer is [ADR-0003](docs/adr/0003-right-first-time-before-control-plane.md) (plan, test review, real host; increments
+reordered). The frontend baseline moved to increment 1.
+
+## Continue here: increment 1 · Right first time
+
+See [docs/PLAN.md](docs/PLAN.md) §4. Work in `worktrees/inc-1` (branch `inc/1-right-first-time`).
+
+## Increment 0 checklist (done)
 
 | # | Item | What done looks like | Where |
 |---|---|---|---|
@@ -30,7 +40,7 @@ Each increment gets its own worktree (`worktrees/inc-N`, gitignored), branched f
 | 5 | **Pilot baseline (dry)** | Both pilot stories (backend .NET, frontend Angular) reach `publish` in dry mode; PR text and guide written locally, nothing pushed. The orchestrating session snapshots each tracker issue and passes it with `--id <KEY> --spec <file>`. Pilot specifics: `local/` (not in git). | `factory-run.sh <project> <story> --id … --spec … --publish dry` |
 | 6 | **Close increment 0** | `docs/evidence/inc-0.md` (metrics only: attempts, verdicts, timings, cost, lessons), tag `inc-0-done`, push. | |
 
-Then increments 1–3 as in [docs/PLAN.md](docs/PLAN.md) §4, and the pilot's real draft PRs after `inc-3-done` (§5).
+Item 5: backend done (3 rounds), frontend moved to increment 1. Item 6: this section and the evidence file.
 
 ### Decided and already built
 - Trusted gates: every command task is `git show <trust>:scripts/launch.sh | sh -s -- …` (quote-free through cmd.exe; the script and the project config come from the factory commit, not from disk).
