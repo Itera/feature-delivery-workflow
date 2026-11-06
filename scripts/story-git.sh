@@ -12,7 +12,7 @@
 #   snapshot [role]               prints "<tree> <head> <trust> <base_sha> <git_meta>"
 #   verify <role> <tree> <head>   tamper guard
 #   lock-tests <attempt> <tree> <head>
-#   run-tests <attempt>           commands come from the trusted config, not from arguments
+#   run-tests <attempt>           commands come from the trusted config, not from arguments; then boots the app (commands.boot)
 #   gate-test <run_result> <accept_hash> <setup_hash>   prints GREEN only if run-tests was GREEN and nothing locked changed
 #   gate reviewer|validator <attempt> <tree> <head>
 #   cleanup | park | git-meta | plan-hash <file>
@@ -256,6 +256,38 @@ run_build_and_tests() {
   fi
 }
 
+# Start the real app (adapter commands.boot) and watch its log until it is ready, crashes or times out; then stop it.
+# Unit tests build classes by hand and never see the host's wiring (DI lifetimes, config binding, startup code);
+# this does. Sets boot_result: READY | CRASHED | TIMEOUT, or empty when the adapter has no boot command.
+boot_check() {
+  local log=$1 bcmd port ready failre limit pid job t=0 seen_ready=0 seen_fail=0 exited=0
+  boot_result=""
+  bcmd=$(cfg commands.boot.command); [ -n "$bcmd" ] || return 0
+  port=$(cfg commands.boot.port); ready=$(cfg commands.boot.ready_regex); failre=$(cfg commands.boot.fail_regex)
+  limit=$(cfg commands.boot.timeout_s); limit=${limit:-120}
+  echo "\$ $bcmd" >"$log"
+  plat_timeout "$((limit + 20))" bash -c "$bcmd" </dev/null >>"$log" 2>&1 &
+  job=$!
+  while [ $t -lt "$limit" ]; do
+    sleep 2; t=$((t + 2))
+    grep -Eq "$ready" "$log" && seen_ready=1
+    grep -Eq "$failre" "$log" && seen_fail=1
+    kill -0 "$job" 2>/dev/null || exited=1
+    if [ $seen_ready -eq 1 ] || [ $seen_fail -eq 1 ] || [ $exited -eq 1 ]; then break; fi
+  done
+  if [ $seen_ready -eq 1 ]; then   # a crash right after "listening" (a hosted service, a bad config section) counts too
+    sleep 5; grep -Eq "$failre" "$log" && seen_fail=1; kill -0 "$job" 2>/dev/null || exited=1
+  fi
+  pid=$(plat_port_pid "$port"); [ -n "$pid" ] && plat_kill_pid "$pid"
+  kill "$job" 2>/dev/null; wait "$job" 2>/dev/null
+  # A failure line always wins; ready means still up after the grace period; any other exit is a crash.
+  if [ $seen_fail -eq 1 ]; then boot_result=CRASHED
+  elif [ $seen_ready -eq 1 ] && [ $exited -eq 0 ]; then boot_result=READY
+  elif [ $exited -eq 1 ]; then boot_result=CRASHED
+  else boot_result=TIMEOUT
+  fi
+}
+
 case "$cmd" in
 git-meta) git_meta_hash; exit ;;
 plan-hash) plan_hash "${1:-}"; exit ;;
@@ -290,6 +322,11 @@ preflight)
   if [ -n "$why" ]; then
     st status=needs_human phase=preflight "feedback.engine=BASE_RED: tests fail on the story base $base before any change ($why, see logs/preflight.log)."
     echo "PREFLIGHT=BASE_TESTS_RED"; exit 1
+  fi
+  boot_check "$RUN/logs/preflight-boot.log"
+  if [ -n "$boot_result" ] && [ "$boot_result" != READY ]; then
+    st status=needs_human phase=preflight "feedback.engine=BASE_RED: the app does not start on the story base $base before any change ($boot_result, see logs/preflight-boot.log). Not the story's fault; fix the base or the adapter's boot command."
+    echo "PREFLIGHT=BASE_BOOT_$boot_result"; exit 1
   fi
   [ -z "$(git status --porcelain)" ] || fail preflight PREFLIGHT=FAILED "build or tests changed tracked files: $(git status --porcelain | head -5 | paste -sd ' ' -)"
   st phase=preflight status=in_progress "base_sha=$(git rev-parse HEAD)"
@@ -358,6 +395,9 @@ run-tests)
     if [ -n "$acc" ] && [ -z "$other" ] && ! grep -Eq "$CONTRACT_ERRORS" "$blog"; then verdict=ACCEPTANCE_TESTS_BUILD_FAIL
     else verdict=BUILD_FAIL; fi
   elif [ -n "$why" ]; then verdict=TEST_FAIL
+  else
+    boot_check "$RUN/logs/boot-$attempt.log"
+    [ -n "$boot_result" ] && [ "$boot_result" != READY ] && verdict=BOOT_FAIL
   fi
   rm -f "$blog"
   case $verdict in
@@ -367,9 +407,11 @@ run-tests)
     BUILD_FAIL) fb="the build failed (exit $brc)${why:+; the tests failed too ($why), possibly because of the build errors}" ;;
     ACCEPTANCE_TESTS_BUILD_FAIL) fb="the build failed (exit $brc) only in acceptance test files ($(printf '%s' "$acc" | paste -sd ' ' -)): the test author must fix them; this attempt is not counted${why:+. The tests failed too ($why)}" ;;
     TEST_FAIL) fb="the tests failed ($why)" ;;
+    BOOT_FAIL) fb="build and tests pass, but the app does not start ($boot_result; it starts on the story base). Startup wiring the unit tests cannot see is broken: dependency-injection lifetimes (a singleton must not take a scoped service; check the lifetime a library registers your type with), configuration binding or startup code"
+               log=$RUN/logs/boot-$attempt.log ;;
   esac
   st phase=tested status=escalated "verdicts.tester=$verdict" "verdicts.tester_attempt=$attempt" \
-    "feedback.tester=$fb. Last lines of the log: $(tail -n 30 "$log")"
+    "feedback.tester=$fb. Last lines of the log: $(grep -v '^\s*at ' "$log" | tail -n 30)"
   printf TEST_GATE_FAIL
   ;;
 gate-test)

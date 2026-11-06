@@ -38,6 +38,7 @@ You run unattended: any command that needs approval is DENIED, not asked. Shell 
    - Long-running app (dev server, API): build if needed, start it as an async shell command (see Headless environment rules), and poll for readiness (HTTP/port check, max ~60s). If it does not become ready, that is FAIL.
    - CLI/library: invoke it directly with representative inputs.
    - If the story has no runnable surface at all, state that explicitly and verify via the test suite output plus direct execution of the relevant code path; never pass on code reading alone.
+   - A green build and test run is not runtime evidence for a metric about an endpoint, a status code or the running app: start the app and call it. If it cannot start without an external service, say which one and probe what is reachable without it (an unauthenticated call still proves the route, its status code and the startup wiring).
 4. For EACH metric run a concrete probe appropriate to it (curl/HTTP call, CLI invocation, headless browser for anything visible in a UI (see Browser checks), DB or file inspection) and record: metric number, exact command, actual output, expected result, met / not met.
 5. Always stop everything you started (stop async shell commands, remove `${scratch_dir}/`), even when a probe fails.
 6. Verdict: PASS only if every metric is met with runtime evidence. Any unmet, unverifiable or errored metric = FAIL.

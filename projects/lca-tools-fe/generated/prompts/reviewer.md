@@ -26,6 +26,8 @@ FEEDBACK
 - Acceptance tests (acceptance test (`${accept_glob}`), written from the acceptance criteria by a separate test author before implementation): does every acceptance criterion have a test with meaningful, specific assertions? A metric with no test, or a test that asserts something contrary to the story = P1.
 - Test integrity: changes that skip, exclude or neutralise tests (`.skip`/`.only`, edits to the test script, runner config or test discovery, mocks that bypass the code under test) = P0.
 - Locked test setup: the story may only ADD lines to it (a project in the solution, a package version, a project reference); the gate records them as `setup_changes` (`${state_cli} get ${task_id} setup_changes`). Each added line must be needed by the story; one that is not = P1.
+- Startup wiring the unit tests cannot see: dependency-injection lifetimes (a singleton, including one a library registers for you, must not take a scoped service), configuration binding, startup code. A captive dependency = P0.
+- New package versions pinned exactly (no `4.*`, `^`, `~`, `latest`); a floating version = P1.
 - Missing test coverage for other new behavior
 - Security: input validation, injection, secrets or credentials in code
 - Basic accessibility (labels, alt text, keyboard/focus) only if frontend code is touched

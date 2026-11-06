@@ -24,7 +24,14 @@
   "commands": {
     "build": "dotnet build LCATools.slnx -c Release",
     "test": "dotnet test LCA.UnitTests/LCA.UnitTests.csproj -c Release --no-build",
-    "test_full": "dotnet test LCATools.slnx -c Release --no-build"
+    "test_full": "dotnet test LCATools.slnx -c Release --no-build",
+    "boot": {
+      "command": "ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5989 dotnet run --project LCA.Api -c Release --no-build --no-launch-profile",
+      "port": 5989,
+      "ready_regex": "Now listening on",
+      "fail_regex": "Unhandled exception|Application startup exception|Host terminated unexpectedly",
+      "timeout_s": 120
+    }
   },
   "tests": {
     "runner": "dotnet-test",

@@ -68,6 +68,18 @@
         "build": { "type": "string" },
         "test": { "type": "string", "description": "Every attempt (fast): must include the acceptance tests" },
         "test_full": { "type": "string", "description": "Once per attempt after review CLEAR (slow suites); absent = skipped" },
+        "boot": {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "port", "ready_regex", "fail_regex"],
+          "description": "Start the real app after a green test run (and on the base in preflight); it must reach ready_regex. Absent = skipped.",
+          "properties": {
+            "command": { "type": "string", "description": "Runs from the repo root after the build; must listen on port" },
+            "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+            "ready_regex": { "type": "string", "description": "ERE matched against the app's output, e.g. Now listening on" },
+            "fail_regex": { "type": "string", "description": "ERE for a startup crash, e.g. Unhandled exception" },
+            "timeout_s": { "type": "integer", "minimum": 10, "maximum": 600 }
+          }
+        },
         "lint": { "type": "string" }
       }
     },
